@@ -1,8 +1,7 @@
 const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.25;
 const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.35;
 const BUFFER_SIZE: u16 = 1;
-const TOLERANCE_SCALE: f32 = 0.2;
-const DEBOUNCE_TIME: u16 = 5;
+const TOLERANCE_SCALE: f32 = 0.05;
 
 pub struct Key {
     pub buffer: [u32; BUFFER_SIZE as usize],
@@ -11,7 +10,6 @@ pub struct Key {
     min_distance_up: u32,
     min_distance_down: u32,
     tolerance: u32,
-    debounce_pos: u16,
     pub keycode: u8,
     is_pressed: bool,
     wooting: bool,
@@ -30,7 +28,6 @@ impl Key {
                 + (highest_point - lowest_point) * MINIMUM_DISTANCE_SCALE_DOWN)
                 as u32,
             tolerance: ((highest_point - lowest_point) * TOLERANCE_SCALE) as u32,
-            debounce_pos: 0,
             buffer_pos: 0,
             keycode,
             is_pressed: false,
@@ -46,33 +43,19 @@ impl Key {
             sum += buf;
         }
         let avg = sum / BUFFER_SIZE as u32;
-        if self.debounce_pos == 0 {
-            if avg < self.min_distance_up {
-                self.pos = avg;
-                self.wooting = false;
-                if self.is_pressed != false {
-                    self.debounce_pos = 1;
-                }
-                self.is_pressed = false;
-            } else if avg > self.pos + self.tolerance
-                || (avg >= self.min_distance_down && !self.wooting)
-            {
-                self.pos = avg;
-                self.wooting = true;
-                if self.is_pressed != true {
-                    self.debounce_pos = 1;
-                }
-                self.is_pressed = true;
-            } else if avg < self.pos - self.tolerance {
-                self.pos = avg;
-                if self.is_pressed != false {
-                    self.debounce_pos = 1;
-                }
-                self.is_pressed = false;
-            }
-        }
-        if self.debounce_pos != 0 {
-            self.debounce_pos = (self.debounce_pos + 1) % DEBOUNCE_TIME;
+        if avg < self.min_distance_up {
+            self.pos = avg;
+            self.wooting = false;
+            self.is_pressed = false;
+        } else if avg > self.pos + self.tolerance
+            || (avg >= self.min_distance_down && !self.wooting)
+        {
+            self.pos = avg;
+            self.wooting = true;
+            self.is_pressed = true;
+        } else if avg < self.pos - self.tolerance {
+            self.pos = avg;
+            self.is_pressed = false;
         }
     }
 

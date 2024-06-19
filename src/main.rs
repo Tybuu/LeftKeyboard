@@ -3,6 +3,8 @@
 
 mod keys;
 mod report;
+use core::borrow::Borrow;
+
 use bsp::{
     entry,
     hal::{self, adc::AdcPin, Adc, Timer},
@@ -53,7 +55,7 @@ static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
 /// The USB Human Interface Device Driver (shared with the interrupt).
 static mut USB_HID: Option<HIDClass<hal::usb::UsbBus>> = None;
 
-static mut REPORT: KeyboardReportNKRO = KeyboardReportNKRO::default();
+static mut REPORT: KeyboardReport = KeyboardReport::default();
 
 #[entry]
 fn main() -> ! {
@@ -77,8 +79,8 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    // let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
-    // let timer = Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    let timer = Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
 
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
@@ -94,7 +96,6 @@ fn main() -> ! {
         true,
         &mut pac.RESETS,
     ));
-
     unsafe {
         USB_BUS = Some(usb_bus);
     }
@@ -106,15 +107,15 @@ fn main() -> ! {
     usb_settings.config = ProtocolModeConfig::ForceReport;
     usb_settings.locale = HidCountryCode::US;
 
-    let usb_hid = HIDClass::new_with_settings(bus_ref, KeyboardReportNKRO::desc(), 1, usb_settings);
+    let usb_hid = HIDClass::new_with_settings(bus_ref, KeyboardReport::desc(), 1, usb_settings);
     unsafe {
         USB_HID = Some(usb_hid);
     }
 
-    let usb_dev = UsbDeviceBuilder::new(&bus_ref, UsbVidPid(0x16c0, 0x27dd))
+    let usb_dev = UsbDeviceBuilder::new(&bus_ref, UsbVidPid(0x0a55, 0x0a55))
         .strings(&[StringDescriptors::default()
             .manufacturer("tybeast")
-            .product("dumb keypad")])
+            .product("crap keypad")])
         .unwrap()
         .device_class(3) // from: https://www.usb.org/defined-class-codes
         .build();
@@ -132,33 +133,50 @@ fn main() -> ! {
     let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
     let pin26 = AdcPin::new(pins.gpio26.into_floating_input()).unwrap();
     let pin27 = AdcPin::new(pins.gpio27.into_floating_input()).unwrap();
+    let mut pin23 = pins.gpio22.into_push_pull_output();
     led_pin.set_high().unwrap();
-    let mut key0 = keys::Key::new(0x07, 2200.0, 3150.0);
-    let mut key1 = keys::Key::new(0x09, 2250.0, 3150.0);
+    pin23.set_high().unwrap();
+    let mut key0 = keys::Key::new(0x07, 2150.0, 3200.0);
+    let mut key1 = keys::Key::new(0x09, 2250.0, 3200.0);
     loop {
-        // let start = timer.get_counter().ticks();
-        let mut adc_fifo = adc
-            .build_fifo()
-            .round_robin((&pin26, &pin27))
-            .clock_divider(0, 0)
-            .start();
-        while adc_fifo.len() < 2 {}
-        key0.update_buf(adc_fifo.read());
-        key1.update_buf(adc_fifo.read());
-        adc_fifo.stop();
-        // let end = timer.get_counter().ticks();
-        info!(
-            "Key0: {}, Pressed: {} | Key1: {}, Pressed {}",
-            key0.buffer,
-            key0.get_key() != 0x00,
-            key1.buffer,
-            key1.get_key() != 0x00 // (end - start)
-        );
+        let mut buf = [0u32; 2];
+        let start = timer.get_counter().ticks();
+        for _ in 0..22 {
+            let mut adc_fifo = adc
+                .build_fifo()
+                .round_robin((&pin26, &pin27))
+                .clock_divider(0, 0)
+                .start();
+            while adc_fifo.len() < 2 {}
+            buf[0] += adc_fifo.read() as u32;
+            buf[1] += adc_fifo.read() as u32;
+            adc_fifo.stop();
+        }
+        // let mut adc_fifo = adc
+        //     .build_fifo()
+        //     .round_robin((&pin26, &pin27))
+        //     .clock_divider(0, 0)
+        //     .start();
+        // while adc_fifo.len() < 2 {}
+        key0.update_buf((buf[0] / 22) as u16);
+        key1.update_buf((buf[1] / 22) as u16);
+        // key0.update_buf(adc_fifo.read());
+        // key1.update_buf(adc_fifo.read());
+        // adc_fifo.stop();
         critical_section::with(|_| unsafe {
             REPORT.keycodes[0] = key0.get_key();
             REPORT.keycodes[1] = key1.get_key();
         });
         asm::wfi();
+        let end = timer.get_counter().ticks();
+        info!(
+            "Key0: {}, Pressed: {} | Key1: {}, Pressed {} | Time: {}",
+            key0.buffer,
+            key0.get_key() != 0x00,
+            key1.buffer,
+            key1.get_key() != 0x00,
+            (end - start)
+        );
     }
 }
 
@@ -167,12 +185,15 @@ fn main() -> ! {
 #[allow(non_snake_case)]
 #[interrupt()]
 unsafe fn USBCTRL_IRQ() {
-    USB_DEVICE
+    if USB_DEVICE
         .as_mut()
         .unwrap()
-        .poll(&mut [USB_HID.as_mut().unwrap()]);
+        .poll(&mut [USB_HID.as_mut().unwrap()])
+    {
+        USB_HID.as_mut().unwrap().poll();
+    }
     USB_HID.as_mut().map(|hid| hid.push_input(&REPORT));
-    USB_HID.as_mut().unwrap().poll();
+    USB_HID.as_mut().unwrap().pull_raw_output(&mut [0; 64]).ok();
 }
 
 // End of file
