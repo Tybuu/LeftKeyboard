@@ -50,4 +50,43 @@ impl KeyboardReportNKRO {
             nkro_keycodes: [0; 13],
         }
     }
+
+    pub fn clear(&mut self) {
+        self.modifier = 0;
+        self.reserved = 0;
+        self.leds = 0;
+        self.keycodes = [0; 6];
+        self.nkro_keycodes = [0; 13];
+    }
+}
+
+#[gen_hid_descriptor(
+    (collection = APPLICATION, usage_page = VENDOR_DEFINED_START, usage = 0x01) = {
+        key_report0=input;
+        key_report1=input;
+        output_buffer=output;
+    }
+)]
+// The max for a single array is 32 elements
+#[allow(dead_code)]
+pub struct BufferReport {
+    pub key_report0: [u8; 32],
+    pub key_report1: [u8; 14],
+    pub output_buffer: [u8; 32],
+}
+
+impl BufferReport {
+    pub const fn default() -> Self {
+        Self {
+            key_report0: [0u8; 32],
+            key_report1: [0u8; 14],
+            output_buffer: [0u8; 32],
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.key_report0 = [0; 32];
+        self.key_report1 = [0; 14];
+        self.output_buffer = [0; 32];
+    }
 }

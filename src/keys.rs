@@ -1,8 +1,9 @@
-const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.25;
-const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.35;
+const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.10;
+const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.15;
 const BUFFER_SIZE: u16 = 1;
-const TOLERANCE_SCALE: f32 = 0.05;
+const TOLERANCE_SCALE: f32 = 0.075;
 
+#[derive(Copy, Clone)]
 pub struct Key {
     pub buffer: [u32; BUFFER_SIZE as usize],
     pos: u32,
@@ -16,6 +17,19 @@ pub struct Key {
 }
 
 impl Key {
+    pub const fn default() -> Self {
+        Self {
+            buffer: [0; BUFFER_SIZE as usize],
+            pos: 0,
+            min_distance_up: 0,
+            min_distance_down: 0,
+            tolerance: 0,
+            buffer_pos: 0,
+            keycode: 0x00,
+            is_pressed: false,
+            wooting: false,
+        }
+    }
     pub(crate) fn new(keycode: u8, lowest_point: f32, highest_point: f32) -> Self {
         Self {
             buffer: [0; BUFFER_SIZE as usize],
@@ -43,17 +57,17 @@ impl Key {
             sum += buf;
         }
         let avg = sum / BUFFER_SIZE as u32;
-        if avg < self.min_distance_up {
+        if avg > self.min_distance_up {
             self.pos = avg;
             self.wooting = false;
             self.is_pressed = false;
-        } else if avg > self.pos + self.tolerance
-            || (avg >= self.min_distance_down && !self.wooting)
+        } else if avg < self.pos - self.tolerance
+            || (avg <= self.min_distance_down && !self.wooting)
         {
             self.pos = avg;
             self.wooting = true;
             self.is_pressed = true;
-        } else if avg < self.pos - self.tolerance {
+        } else if avg > self.pos + self.tolerance {
             self.pos = avg;
             self.is_pressed = false;
         }
@@ -65,5 +79,13 @@ impl Key {
         } else {
             0x00
         }
+    }
+
+    pub fn get_buf(&self) -> u16 {
+        let mut sum = 0;
+        for buf in self.buffer {
+            sum += buf as u16;
+        }
+        sum / BUFFER_SIZE
     }
 }
