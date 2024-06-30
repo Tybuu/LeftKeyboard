@@ -4,8 +4,22 @@
 mod keys;
 mod report;
 
+use adafruit_kb2040 as bsp;
+use bsp::{
+    entry,
+    hal::{
+        self,
+        adc::AdcPin,
+        gpio::{
+            bank0::{Gpio0, Gpio1, Gpio2},
+            Function, FunctionSio, Pin, PinId, PullType, SioOutput,
+        },
+        Adc, Timer, I2C,
+    },
+    pac::{self, interrupt::USBCTRL_IRQ, RESETS},
+};
+use cortex_m::{asm, interrupt::free as disable_interrupts};
 use cortex_m::{
-    asm,
     delay::Delay,
     prelude::{_embedded_hal_adc_OneShot, _embedded_hal_blocking_delay_DelayMs},
 };
@@ -17,22 +31,20 @@ use embedded_hal::{
     i2c::I2c,
 };
 use fugit::RateExtU32;
-use hal::clocks::init_clocks_and_plls;
-use hal::gpio::bank0::{Gpio0, Gpio1, Gpio2};
-use hal::gpio::{FunctionSio, Pin, Pins, PullType, SioOutput};
-use hal::{adc::AdcPin, Clock};
-use hal::{
-    pac::{self, interrupt},
-    Adc, Sio, Timer, Watchdog,
-};
 use keys::Key;
 use panic_probe as _;
 use report::{BufferReport, KeyboardReportNKRO};
-use rp2040_hal as hal;
 
 // Provide an alias for our BSP so we can switch targets quickly.
 // Uncomment the BSP you included in Cargo.toml, the rest of the code does not need to change.
 // use sparkfun_pro_micro_rp2040 as bsp;
+
+use adafruit_kb2040::hal::{
+    clocks::{init_clocks_and_plls, Clock},
+    pac::interrupt,
+    sio::Sio,
+    watchdog::Watchdog,
+};
 
 use usb_device::{
     class_prelude::{UsbBusAllocator, UsbClass},
@@ -61,11 +73,9 @@ static mut REPORT: KeyboardReportNKRO = KeyboardReportNKRO::default();
 
 static mut BUFFER: BufferReport = BufferReport::default();
 
-static mut NUM: u8 = 0;
-
 static mut KEYS: [Key; 21] = [Key::default(); 21];
 
-#[hal::entry]
+#[entry]
 fn main() -> ! {
     info!("Program start");
     let mut pac = pac::Peripherals::take().unwrap();
@@ -90,7 +100,7 @@ fn main() -> ! {
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
     let timer = Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
 
-    let pins = Pins::new(
+    let pins = bsp::Pins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
         sio.gpio_bank0,
@@ -143,53 +153,33 @@ fn main() -> ! {
         pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
     };
 
-    let mut sel0 = pins.gpio2.into_push_pull_output();
-    let mut sel1 = pins.gpio1.into_push_pull_output();
-    let mut sel2 = pins.gpio0.into_push_pull_output();
+    let mut sel0 = pins.d2.into_push_pull_output();
+    let mut sel1 = pins.rx.into_push_pull_output();
+    let mut sel2 = pins.tx.into_push_pull_output();
 
     sel0.set_low().unwrap();
     sel1.set_low().unwrap();
     sel2.set_low().unwrap();
 
     let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
-    let mut a0 = AdcPin::new(pins.gpio26).unwrap();
-    let mut a1 = AdcPin::new(pins.gpio27).unwrap();
-    let mut a2 = AdcPin::new(pins.gpio28).unwrap();
-    let mut a3 = AdcPin::new(pins.gpio29).unwrap();
+    // Pins names are matched to the names in the schematic (i trolled)
+    let mut a3 = AdcPin::new(pins.a0).unwrap();
+    let mut a2 = AdcPin::new(pins.a1).unwrap();
+    let mut a1 = AdcPin::new(pins.a2).unwrap();
+    let mut a0 = AdcPin::new(pins.a3).unwrap();
 
     let mut keys = [Key::new(0x00, 1400.0, 2000.0); 21];
 
     loop {
-        let start = timer.get_counter().ticks();
         for i in 0..6 {
             change_sel(&mut sel0, &mut sel1, &mut sel2, i);
             delay.delay_us(10);
             if i != 5 {
-                // let mut adc_fifo = adc
-                //     .build_fifo()
-                //     .round_robin((&a0, &a1, &a2, &a3))
-                //     .clock_divider(0, 0)
-                //     .start();
-                // while adc_fifo.len() < 4 {}
-                // keys[usize::from(4 * i as u16)].update_buf(adc_fifo.read());
-                // keys[usize::from(4 * i as u16 + 1)].update_buf(adc_fifo.read());
-                // keys[usize::from(4 * i as u16 + 2)].update_buf(adc_fifo.read());
-                // keys[usize::from(4 * i as u16 + 3)].update_buf(adc_fifo.read());
-                // adc_fifo.stop();
-                let val: u16 = adc.read(&mut a0).unwrap();
-                keys[usize::from(4 * i as u16)].update_buf(val);
-                keys[usize::from(4 * i as u16 + 1)].update_buf(val);
-                keys[usize::from(4 * i as u16 + 2)].update_buf(val);
-                keys[usize::from(4 * i as u16 + 3)].update_buf(val);
+                keys[usize::from(4 * i as u16)].update_buf(adc.read(&mut a0).unwrap());
+                keys[usize::from(4 * i as u16 + 1)].update_buf(adc.read(&mut a1).unwrap());
+                keys[usize::from(4 * i as u16 + 2)].update_buf(adc.read(&mut a2).unwrap());
+                keys[usize::from(4 * i as u16 + 3)].update_buf(adc.read(&mut a3).unwrap());
             } else {
-                // let mut adc_fifo = adc
-                //     .build_fifo()
-                //     .round_robin(&a3)
-                //     .clock_divider(0, 0)
-                //     .start();
-                // while adc_fifo.len() < 1 {}
-                // keys[20].update_buf(adc_fifo.read());
-                // adc_fifo.stop();
                 keys[20].update_buf(adc.read(&mut a0).unwrap());
             }
         }
@@ -207,13 +197,8 @@ fn main() -> ! {
                 BUFFER.key_report1[usize::from((i as u16 - 16) * 2 + 1)] =
                     (keys[usize::from(i as u16)].get_buf() & 0b11111111 as u16) as u8;
             }
-            BUFFER.key_report1[10] = a0.channel();
-            BUFFER.key_report1[11] = a1.channel();
-            BUFFER.key_report1[12] = a2.channel();
-            BUFFER.key_report1[13] = a3.channel();
         });
         asm::wfi();
-        let end = timer.get_counter().ticks();
     }
 }
 

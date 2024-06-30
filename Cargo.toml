@@ -19,14 +19,14 @@ fugit = "*"
 
 # We're using a Pico by default on this template
 # rp-pico = "0.9"
-# adafruit-kb2040 = "0.10"
+adafruit-kb2040 = { git = "https://github.com/rp-rs/rp-hal-boards/", rev = "91fc712c0be267ad3643bb2e981a703d2298ff78" }
 
 # but you can use any BSP. Uncomment this to use the pro_micro_rp2040 BSP instead
 # sparkfun-pro-micro-rp2040 = "0.8"
 
 # If you're not going to use a Board Support Package you'll need these:
-rp2040-hal = { version = "0.10", features = ["rt", "critical-section-impl"] }
-rp2040-boot2 = "0.2"
+rp2040-hal = { version = "0.10.2", features = ["rt", "critical-section-impl"] }
+# rp2040-boot2 = "0.2"
 
 # cargo build/run
 [profile.dev]
