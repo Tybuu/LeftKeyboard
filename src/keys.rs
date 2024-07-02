@@ -1,39 +1,58 @@
-const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.10;
-const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.15;
-const BUFFER_SIZE: u16 = 1;
+const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.90;
+const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.85;
+const BUFFER_SIZE: u16 = 4;
 const TOLERANCE_SCALE: f32 = 0.075;
+
+const NUM_LAYERS: usize = 2;
+
+#[derive(Copy, Clone)]
+pub enum KeyType {
+    Letter,
+    Modifier,
+    Layer,
+}
 
 #[derive(Copy, Clone)]
 pub struct Key {
     pub buffer: [u32; BUFFER_SIZE as usize],
-    pos: u32,
+    position: u32,
     buffer_pos: u16,
     min_distance_up: u32,
     min_distance_down: u32,
     tolerance: u32,
-    pub keycode: u8,
+    pub bit_pos: [u8; 2], // Num represents pos to toggle in nkro report. Index indicates layer
     is_pressed: bool,
     wooting: bool,
+    pub key_type: KeyType,
+    pub current_layer: i8, // When a key is held, it will hold it's layer even when the a different
+                           // layer key is pressed. This variable will keep track of that layer
 }
 
 impl Key {
     pub const fn default() -> Self {
         Self {
             buffer: [0; BUFFER_SIZE as usize],
-            pos: 0,
+            position: 0,
             min_distance_up: 0,
             min_distance_down: 0,
             tolerance: 0,
             buffer_pos: 0,
-            keycode: 0x00,
+            bit_pos: [0x00; NUM_LAYERS],
             is_pressed: false,
             wooting: false,
+            key_type: KeyType::Letter,
+            current_layer: -1,
         }
     }
-    pub(crate) fn new(keycode: u8, lowest_point: f32, highest_point: f32) -> Self {
+    pub(crate) fn new(
+        bit_pos: [u8; NUM_LAYERS],
+        key_type: KeyType,
+        lowest_point: f32,
+        highest_point: f32,
+    ) -> Self {
         Self {
             buffer: [0; BUFFER_SIZE as usize],
-            pos: (lowest_point + ((highest_point - lowest_point) * MINIMUM_DISTANCE_SCALE_UP))
+            position: (lowest_point + ((highest_point - lowest_point) * MINIMUM_DISTANCE_SCALE_UP))
                 as u32,
             min_distance_up: (lowest_point
                 + (highest_point - lowest_point) * MINIMUM_DISTANCE_SCALE_UP)
@@ -43,9 +62,11 @@ impl Key {
                 as u32,
             tolerance: ((highest_point - lowest_point) * TOLERANCE_SCALE) as u32,
             buffer_pos: 0,
-            keycode,
+            bit_pos,
             is_pressed: false,
             wooting: false,
+            key_type,
+            current_layer: -1,
         }
     }
 
@@ -58,27 +79,23 @@ impl Key {
         }
         let avg = sum / BUFFER_SIZE as u32;
         if avg > self.min_distance_up {
-            self.pos = avg;
+            self.position = avg;
             self.wooting = false;
             self.is_pressed = false;
-        } else if avg < self.pos - self.tolerance
+        } else if avg < self.position - self.tolerance
             || (avg <= self.min_distance_down && !self.wooting)
         {
-            self.pos = avg;
+            self.position = avg;
             self.wooting = true;
             self.is_pressed = true;
-        } else if avg > self.pos + self.tolerance {
-            self.pos = avg;
+        } else if avg > self.position + self.tolerance {
+            self.position = avg;
             self.is_pressed = false;
         }
     }
 
-    pub fn get_key(&self) -> u8 {
-        if self.is_pressed {
-            self.keycode
-        } else {
-            0x00
-        }
+    pub fn is_pressed(&self) -> bool {
+        self.is_pressed
     }
 
     pub fn get_buf(&self) -> u16 {

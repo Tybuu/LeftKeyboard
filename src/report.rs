@@ -24,8 +24,8 @@ use usbd_hid::descriptor::{
             #[item_settings data,array,absolute]
             keycodes=input;
         };
-        (usage_page = KEYBOARD, usage_min = 0x04, usage_max = 0x65) = {
-            #[packed_bits 101]
+        (usage_page = KEYBOARD, usage_min = 0x04, usage_max = 0x52) = {
+            #[packed_bits 78]
             #[item_settings data,variable,absolute]
             nkro_keycodes=input;
         };
@@ -37,7 +37,7 @@ pub struct KeyboardReportNKRO {
     pub reserved: u8,
     pub leds: u8,
     pub keycodes: [u8; 6],
-    pub nkro_keycodes: [u8; 13],
+    pub nkro_keycodes: [u8; 10],
 }
 
 impl KeyboardReportNKRO {
@@ -47,16 +47,8 @@ impl KeyboardReportNKRO {
             reserved: 0,
             leds: 0,
             keycodes: [0; 6],
-            nkro_keycodes: [0; 13],
+            nkro_keycodes: [0; 10],
         }
-    }
-
-    pub fn clear(&mut self) {
-        self.modifier = 0;
-        self.reserved = 0;
-        self.leds = 0;
-        self.keycodes = [0; 6];
-        self.nkro_keycodes = [0; 13];
     }
 }
 
@@ -82,11 +74,5 @@ impl BufferReport {
             key_report1: [0u8; 14],
             output_buffer: [0u8; 32],
         }
-    }
-
-    pub fn clear(&mut self) {
-        self.key_report0 = [0; 32];
-        self.key_report1 = [0; 14];
-        self.output_buffer = [0; 32];
     }
 }

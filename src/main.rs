@@ -4,6 +4,8 @@
 mod keys;
 mod report;
 
+use core::usize;
+
 use adafruit_kb2040 as bsp;
 use bsp::{
     entry,
@@ -30,8 +32,9 @@ use embedded_hal::{
     digital::{InputPin, OutputPin, StatefulOutputPin},
     i2c::I2c,
 };
+use export::usize;
 use fugit::RateExtU32;
-use keys::Key;
+use keys::{Key, KeyType};
 use panic_probe as _;
 use report::{BufferReport, KeyboardReportNKRO};
 
@@ -168,7 +171,50 @@ fn main() -> ! {
     let mut a1 = AdcPin::new(pins.a2).unwrap();
     let mut a0 = AdcPin::new(pins.a3).unwrap();
 
-    let mut keys = [Key::new(0x00, 1400.0, 2000.0); 21];
+    let mut keys = [Key::new([0x00; 2], KeyType::Letter, 1400.0, 2000.0); 21];
+
+    // TODO:: Use EEPROM to initalize the key parameters
+    //
+    // Initialize Keys
+    keys[0].bit_pos[0] = 19;
+    keys[0].bit_pos[1] = 58;
+    keys[1].bit_pos[0] = 3;
+    keys[1].bit_pos[1] = 28;
+    keys[2].bit_pos[0] = 22;
+    keys[2].bit_pos[1] = 55;
+    keys[3].bit_pos[0] = 53;
+    keys[4].bit_pos[0] = 6;
+    keys[4].bit_pos[1] = 30;
+    keys[5].bit_pos[0] = 17;
+    keys[5].bit_pos[1] = 57;
+    keys[6].bit_pos[0] = 18;
+    keys[6].bit_pos[1] = 27;
+    keys[8].bit_pos[0] = 1;
+    keys[9].bit_pos[0] = 5;
+    keys[9].bit_pos[1] = 29;
+    keys[10].bit_pos[0] = 23;
+    // keys[7].bit_pos[0] = 37;
+    keys[11].bit_pos[0] = 0;
+    keys[11].bit_pos[1] = 26;
+    keys[13].bit_pos[0] = 2;
+    keys[14].bit_pos[0] = 16;
+    keys[14].bit_pos[1] = 54;
+    keys[17].bit_pos[0] = 21;
+    keys[18].bit_pos[0] = 4;
+    keys[18].bit_pos[1] = 56;
+    keys[19].bit_pos[0] = 25;
+    keys[20].bit_pos[0] = 40;
+
+    // Mod Keys
+    keys[12].bit_pos[0] = 3;
+    keys[12].bit_pos[1] = 3;
+    keys[12].key_type = KeyType::Modifier;
+    keys[15].bit_pos[0] = 1;
+    keys[15].bit_pos[1] = 1;
+    keys[15].key_type = KeyType::Modifier;
+
+    // Layer Keys
+    keys[16].key_type = KeyType::Layer;
 
     loop {
         for i in 0..6 {
@@ -183,19 +229,19 @@ fn main() -> ! {
                 keys[20].update_buf(adc.read(&mut a0).unwrap());
             }
         }
+        let report = generate_report(&mut keys);
         critical_section::with(|_| unsafe {
+            (REPORT.modifier, REPORT.nkro_keycodes) = report;
             for i in 0..16 {
-                BUFFER.key_report0[usize::from(i as u16 * 2)] =
-                    ((keys[usize::from(i as u16)].get_buf() & !(0b11111111 as u16)) >> 8) as u8;
-                BUFFER.key_report0[usize::from(i as u16 * 2 + 1)] =
-                    (keys[usize::from(i as u16)].get_buf() & 0b11111111 as u16) as u8;
+                let bytes = keys[usize::from(i as u16)].get_buf().to_be_bytes();
+                BUFFER.key_report0[usize::from(i as u16 * 2)] = bytes[0];
+                BUFFER.key_report0[usize::from(i as u16 * 2 + 1)] = bytes[1];
             }
 
             for i in 16..21 {
-                BUFFER.key_report1[usize::from((i as u16 - 16) * 2)] =
-                    ((keys[usize::from(i as u16)].get_buf() & !(0b11111111 as u16)) >> 8) as u8;
-                BUFFER.key_report1[usize::from((i as u16 - 16) * 2 + 1)] =
-                    (keys[usize::from(i as u16)].get_buf() & 0b11111111 as u16) as u8;
+                let bytes = keys[usize::from(i as u16)].get_buf().to_be_bytes();
+                BUFFER.key_report1[usize::from((i as u16 - 16) * 2)] = bytes[0];
+                BUFFER.key_report1[usize::from((i as u16 - 16) * 2 + 1)] = bytes[1];
             }
         });
         asm::wfi();
@@ -245,6 +291,55 @@ fn change_sel<P: PullType>(
             sel2.set_low().unwrap();
         }
     }
+}
+
+// Returns the values that can be used in the keyboard report. First value in the tuple
+// is the modifier keys while the second is the nkro keycodes
+fn generate_report(keys: &mut [Key]) -> (u8, [u8; 10]) {
+    let mut mod_report = 0u8;
+    let mut nkro_report = [0u8; 10];
+
+    // Find which layer we need to use by looking at the status of the layer keys
+    let mut layer: usize = 0;
+    if keys[16].is_pressed() {
+        layer = 1;
+    }
+    for i in 0..keys.len() {
+        if keys[usize::from(i)].is_pressed() {
+            if keys[usize::from(i)].current_layer == -1 {
+                match keys[usize::from(i)].key_type {
+                    KeyType::Letter => {
+                        let index = keys[usize::from(i)].bit_pos[layer] / 8;
+                        let mask = 1 << (keys[usize::from(i)].bit_pos[layer] % 8);
+                        nkro_report[usize::from(index)] |= mask;
+                    }
+                    KeyType::Modifier => {
+                        let mask = 1 << (keys[usize::from(i)].bit_pos[layer] % 8);
+                        mod_report |= mask;
+                    }
+                    KeyType::Layer => {}
+                }
+                keys[usize::from(i)].current_layer = layer as i8;
+            } else {
+                let layer = usize::from(keys[usize::from(i)].current_layer as u8);
+                match keys[usize::from(i)].key_type {
+                    KeyType::Letter => {
+                        let index = keys[usize::from(i)].bit_pos[layer] / 8;
+                        let mask = 1 << (keys[usize::from(i)].bit_pos[layer] % 8);
+                        nkro_report[usize::from(index)] |= mask;
+                    }
+                    KeyType::Modifier => {
+                        let mask = 1 << (keys[usize::from(i)].bit_pos[layer] % 8);
+                        mod_report |= mask;
+                    }
+                    KeyType::Layer => {}
+                }
+            }
+        } else {
+            keys[usize::from(i)].current_layer = -1;
+        }
+    }
+    return (mod_report, nkro_report);
 }
 
 /// This function is called whenever the USB Hardware generates an Interrupt
