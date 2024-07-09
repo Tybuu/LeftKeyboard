@@ -1,6 +1,6 @@
 const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.90;
 const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.85;
-const BUFFER_SIZE: u16 = 4;
+const BUFFER_SIZE: u16 = 2;
 const TOLERANCE_SCALE: f32 = 0.075;
 
 const NUM_LAYERS: usize = 2;

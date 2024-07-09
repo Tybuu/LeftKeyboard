@@ -4,8 +4,6 @@
 mod keys;
 mod report;
 
-use core::usize;
-
 use adafruit_kb2040 as bsp;
 use bsp::{
     entry,
@@ -14,26 +12,19 @@ use bsp::{
         adc::AdcPin,
         gpio::{
             bank0::{Gpio0, Gpio1, Gpio2},
-            Function, FunctionSio, Pin, PinId, PullType, SioOutput,
+            FunctionSio, Pin, PullType, SioOutput,
         },
-        Adc, Timer, I2C,
+        Adc, Timer,
     },
     pac::{self, interrupt::USBCTRL_IRQ, RESETS},
 };
-use cortex_m::{asm, interrupt::free as disable_interrupts};
-use cortex_m::{
-    delay::Delay,
-    prelude::{_embedded_hal_adc_OneShot, _embedded_hal_blocking_delay_DelayMs},
-};
-use critical_section::Mutex;
+use core::iter::once;
+use cortex_m::asm;
+use cortex_m::prelude::_embedded_hal_adc_OneShot;
 use defmt::*;
 use defmt_rtt as _;
-use embedded_hal::{
-    digital::{InputPin, OutputPin, StatefulOutputPin},
-    i2c::I2c,
-};
-use export::usize;
-use fugit::RateExtU32;
+use embedded_hal::digital::OutputPin;
+use hal::pio::PIOExt;
 use keys::{Key, KeyType};
 use panic_probe as _;
 use report::{BufferReport, KeyboardReportNKRO};
@@ -49,17 +40,22 @@ use adafruit_kb2040::hal::{
     watchdog::Watchdog,
 };
 
+use smart_leds::{brightness, colors};
+use smart_leds_trait::{SmartLedsWrite, RGB8};
 use usb_device::{
     class_prelude::{UsbBusAllocator, UsbClass},
     device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
 };
 use usbd_hid::{
-    descriptor::{KeyboardReport, SerializedDescriptor},
+    descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor},
     hid_class::{
         HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidProtocolMode, HidSubClass,
         ProtocolModeConfig,
     },
 };
+use ws2812_pio::Ws2812;
+
+use crate::report::ModifierPosition;
 
 /// The USB Device Driver (shared with the interrupt).
 static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
@@ -77,6 +73,8 @@ static mut REPORT: KeyboardReportNKRO = KeyboardReportNKRO::default();
 static mut BUFFER: BufferReport = BufferReport::default();
 
 static mut KEYS: [Key; 21] = [Key::default(); 21];
+
+static mut SHIFT: bool = false;
 
 #[entry]
 fn main() -> ! {
@@ -108,6 +106,15 @@ fn main() -> ! {
         pac.PADS_BANK0,
         sio.gpio_bank0,
         &mut pac.RESETS,
+    );
+
+    let (mut pio, sm0, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
+    let mut ws = Ws2812::new(
+        pins.neopixel.into_function(),
+        &mut pio,
+        sm0,
+        clocks.peripheral_clock.freq(),
+        timer.count_down(),
     );
 
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
@@ -156,13 +163,9 @@ fn main() -> ! {
         pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
     };
 
-    let mut sel0 = pins.d2.into_push_pull_output();
+    let mut sel0 = pins.tx.into_push_pull_output();
     let mut sel1 = pins.rx.into_push_pull_output();
-    let mut sel2 = pins.tx.into_push_pull_output();
-
-    sel0.set_low().unwrap();
-    sel1.set_low().unwrap();
-    sel2.set_low().unwrap();
+    let mut sel2 = pins.d2.into_push_pull_output();
 
     let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
     // Pins names are matched to the names in the schematic (i trolled)
@@ -171,64 +174,63 @@ fn main() -> ! {
     let mut a1 = AdcPin::new(pins.a2).unwrap();
     let mut a0 = AdcPin::new(pins.a3).unwrap();
 
+    // let mut i2c = I2C::i2c1(
+    //     pac.I2C1,
+    //     pins.d10.reconfigure(),
+    //     pins.mosi.reconfigure(),
+    //     400.kHz(),
+    //     &mut pac.RESETS,
+    //     clocks.system_clock.freq(),
+    // );
+
     let mut keys = [Key::new([0x00; 2], KeyType::Letter, 1400.0, 2000.0); 21];
 
     // TODO:: Use EEPROM to initalize the key parameters
     //
     // Initialize Keys
-    keys[0].bit_pos[0] = 19;
-    keys[0].bit_pos[1] = 58;
-    keys[1].bit_pos[0] = 3;
-    keys[1].bit_pos[1] = 28;
-    keys[2].bit_pos[0] = 22;
-    keys[2].bit_pos[1] = 55;
-    keys[3].bit_pos[0] = 53;
-    keys[4].bit_pos[0] = 6;
-    keys[4].bit_pos[1] = 30;
-    keys[5].bit_pos[0] = 17;
-    keys[5].bit_pos[1] = 57;
-    keys[6].bit_pos[0] = 18;
-    keys[6].bit_pos[1] = 27;
-    keys[8].bit_pos[0] = 1;
-    keys[9].bit_pos[0] = 5;
-    keys[9].bit_pos[1] = 29;
-    keys[10].bit_pos[0] = 23;
-    // keys[7].bit_pos[0] = 37;
-    keys[11].bit_pos[0] = 0;
-    keys[11].bit_pos[1] = 26;
-    keys[13].bit_pos[0] = 2;
-    keys[14].bit_pos[0] = 16;
-    keys[14].bit_pos[1] = 54;
-    keys[17].bit_pos[0] = 21;
-    keys[18].bit_pos[0] = 4;
-    keys[18].bit_pos[1] = 56;
-    keys[19].bit_pos[0] = 25;
-    keys[20].bit_pos[0] = 40;
+    keys[0].bit_pos[0] = KeyboardUsage::KeyboardHh as u8;
+    keys[1].bit_pos[0] = KeyboardUsage::KeyboardKk as u8;
+    keys[2].bit_pos[0] = KeyboardUsage::KeyboardOo as u8;
+    keys[4].bit_pos[0] = KeyboardUsage::KeyboardYy as u8;
+    keys[5].bit_pos[0] = KeyboardUsage::KeyboardUu as u8;
+    keys[6].bit_pos[0] = KeyboardUsage::KeyboardLl as u8;
+    keys[9].bit_pos[0] = KeyboardUsage::KeyboardJj as u8;
+    keys[14].bit_pos[0] = KeyboardUsage::KeyboardPp as u8;
+    keys[18].bit_pos[0] = KeyboardUsage::KeyboardIi as u8;
 
-    // Mod Keys
-    keys[12].bit_pos[0] = 3;
-    keys[12].bit_pos[1] = 3;
-    keys[12].key_type = KeyType::Modifier;
-    keys[15].bit_pos[0] = 1;
-    keys[15].bit_pos[1] = 1;
-    keys[15].key_type = KeyType::Modifier;
+    keys[20].key_type = KeyType::Modifier;
+    keys[20].bit_pos[0] = ModifierPosition::LeftShift as u8;
 
-    // Layer Keys
-    keys[16].key_type = KeyType::Layer;
+    let mut n: u8 = 128;
 
     loop {
+        ws.write(brightness(once(colors::CYAN), 48)).unwrap();
+        n = n.wrapping_add(1);
         for i in 0..6 {
             change_sel(&mut sel0, &mut sel1, &mut sel2, i);
             delay.delay_us(10);
             if i != 5 {
-                keys[usize::from(4 * i as u16)].update_buf(adc.read(&mut a0).unwrap());
-                keys[usize::from(4 * i as u16 + 1)].update_buf(adc.read(&mut a1).unwrap());
-                keys[usize::from(4 * i as u16 + 2)].update_buf(adc.read(&mut a2).unwrap());
-                keys[usize::from(4 * i as u16 + 3)].update_buf(adc.read(&mut a3).unwrap());
+                keys[usize::from(4 * i as u16)].update_buf(adc.read(&mut a0).unwrap_or(69));
+                keys[usize::from(4 * i as u16 + 1)].update_buf(adc.read(&mut a1).unwrap_or(69));
+                keys[usize::from(4 * i as u16 + 2)].update_buf(adc.read(&mut a2).unwrap_or(69));
+                keys[usize::from(4 * i as u16 + 3)].update_buf(adc.read(&mut a3).unwrap_or(69));
             } else {
-                keys[20].update_buf(adc.read(&mut a0).unwrap());
+                keys[20].update_buf(adc.read(&mut a0).unwrap_or(69));
             }
         }
+        // let mut buf = [0u8; 22];
+        // let mut read = false;
+        // loop {
+        //     match i2c.read(0x72u8, &mut buf) {
+        //         Ok(_) => {
+        //             if buf[0] == 0x7 {
+        //                 read = true;
+        //                 break;
+        //             }
+        //         }
+        //         Err(_) => break,
+        //     }
+        // }
         let report = generate_report(&mut keys);
         critical_section::with(|_| unsafe {
             (REPORT.modifier, REPORT.nkro_keycodes) = report;
@@ -243,15 +245,16 @@ fn main() -> ! {
                 BUFFER.key_report1[usize::from((i as u16 - 16) * 2)] = bytes[0];
                 BUFFER.key_report1[usize::from((i as u16 - 16) * 2 + 1)] = bytes[1];
             }
+            BUFFER.key_report1[10] = SHIFT as u8;
         });
         asm::wfi();
     }
 }
 
 fn change_sel<P: PullType>(
-    sel0: &mut Pin<Gpio2, FunctionSio<SioOutput>, P>,
+    sel0: &mut Pin<Gpio0, FunctionSio<SioOutput>, P>,
     sel1: &mut Pin<Gpio1, FunctionSio<SioOutput>, P>,
-    sel2: &mut Pin<Gpio0, FunctionSio<SioOutput>, P>,
+    sel2: &mut Pin<Gpio2, FunctionSio<SioOutput>, P>,
     num: u8,
 ) {
     match num {
@@ -295,51 +298,71 @@ fn change_sel<P: PullType>(
 
 // Returns the values that can be used in the keyboard report. First value in the tuple
 // is the modifier keys while the second is the nkro keycodes
-fn generate_report(keys: &mut [Key]) -> (u8, [u8; 10]) {
+fn generate_report(keys: &mut [Key]) -> (u8, [u8; 11]) {
     let mut mod_report = 0u8;
-    let mut nkro_report = [0u8; 10];
+    let mut nkro_report = [0u8; 11];
+
+    unsafe {
+        if SHIFT {
+            let mask = 1 << 1;
+            mod_report |= mask;
+        }
+    }
 
     // Find which layer we need to use by looking at the status of the layer keys
     let mut layer: usize = 0;
-    if keys[16].is_pressed() {
-        layer = 1;
-    }
     for i in 0..keys.len() {
-        if keys[usize::from(i)].is_pressed() {
-            if keys[usize::from(i)].current_layer == -1 {
-                match keys[usize::from(i)].key_type {
+        if keys[i].is_pressed() {
+            if keys[i].current_layer == -1 {
+                match keys[i].key_type {
                     KeyType::Letter => {
-                        let index = keys[usize::from(i)].bit_pos[layer] / 8;
-                        let mask = 1 << (keys[usize::from(i)].bit_pos[layer] % 8);
+                        let index = keys[i].bit_pos[layer] / 8;
+                        let mask = 1 << (keys[i].bit_pos[layer] % 8);
                         nkro_report[usize::from(index)] |= mask;
                     }
                     KeyType::Modifier => {
-                        let mask = 1 << (keys[usize::from(i)].bit_pos[layer] % 8);
+                        let mask = 1 << (keys[i].bit_pos[layer] % 8);
                         mod_report |= mask;
                     }
                     KeyType::Layer => {}
                 }
-                keys[usize::from(i)].current_layer = layer as i8;
+                keys[i].current_layer = layer as i8;
             } else {
-                let layer = usize::from(keys[usize::from(i)].current_layer as u8);
-                match keys[usize::from(i)].key_type {
+                let layer = usize::from(keys[i].current_layer as u8);
+                match keys[i].key_type {
                     KeyType::Letter => {
-                        let index = keys[usize::from(i)].bit_pos[layer] / 8;
-                        let mask = 1 << (keys[usize::from(i)].bit_pos[layer] % 8);
+                        let index = keys[i].bit_pos[layer] / 8;
+                        let mask = 1 << (keys[i].bit_pos[layer] % 8);
                         nkro_report[usize::from(index)] |= mask;
                     }
                     KeyType::Modifier => {
-                        let mask = 1 << (keys[usize::from(i)].bit_pos[layer] % 8);
+                        let mask = 1 << (keys[i].bit_pos[layer] % 8);
                         mod_report |= mask;
                     }
                     KeyType::Layer => {}
                 }
             }
         } else {
-            keys[usize::from(i)].current_layer = -1;
+            keys[i].current_layer = -1;
         }
     }
-    return (mod_report, nkro_report);
+    (mod_report, nkro_report)
+}
+
+fn wheel(mut wheel_pos: u8) -> RGB8 {
+    wheel_pos = 255 - wheel_pos;
+    if wheel_pos < 85 {
+        // No green in this sector - red and blue only
+        (255 - (wheel_pos * 3), 0, wheel_pos * 3).into()
+    } else if wheel_pos < 170 {
+        // No red in this sector - green and blue only
+        wheel_pos -= 85;
+        (0, wheel_pos * 3, 255 - (wheel_pos * 3)).into()
+    } else {
+        // No blue in this sector - red and green only
+        wheel_pos -= 170;
+        (wheel_pos * 3, 255 - (wheel_pos * 3), 0).into()
+    }
 }
 
 /// This function is called whenever the USB Hardware generates an Interrupt
@@ -358,6 +381,11 @@ unsafe fn USBCTRL_IRQ() {
     USB_HID.as_mut().map(|hid| hid.push_input(&REPORT));
     USB_HID.as_mut().unwrap().pull_raw_output(&mut [0; 64]).ok();
     USB_HID2.as_mut().map(|hid| hid.push_input(&BUFFER));
+    let mut buf = [0u8; 32];
+    USB_HID2.as_mut().unwrap().pull_raw_output(&mut buf).ok();
+    if buf[0] == 7 {
+        SHIFT = !SHIFT;
+    }
 }
 
 // End of file
