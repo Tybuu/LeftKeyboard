@@ -149,7 +149,7 @@ fn main() -> ! {
     let usb_dev = UsbDeviceBuilder::new(bus_ref, UsbVidPid(0x0a55, 0x0a55))
         .strings(&[StringDescriptors::default()
             .manufacturer("tybeast")
-            .product("crap keypad")])
+            .product("Left Tybeast Ones")])
         .unwrap()
         .device_class(3) // from: https://www.usb.org/defined-class-codes
         .build();
@@ -163,9 +163,9 @@ fn main() -> ! {
         pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
     };
 
-    let mut sel0 = pins.tx.into_push_pull_output();
+    let mut sel0 = pins.d2.into_push_pull_output();
     let mut sel1 = pins.rx.into_push_pull_output();
-    let mut sel2 = pins.d2.into_push_pull_output();
+    let mut sel2 = pins.tx.into_push_pull_output();
 
     let mut adc = Adc::new(pac.ADC, &mut pac.RESETS);
     // Pins names are matched to the names in the schematic (i trolled)
@@ -188,24 +188,56 @@ fn main() -> ! {
     // TODO:: Use EEPROM to initalize the key parameters
     //
     // Initialize Keys
-    keys[0].bit_pos[0] = KeyboardUsage::KeyboardHh as u8;
-    keys[1].bit_pos[0] = KeyboardUsage::KeyboardKk as u8;
-    keys[2].bit_pos[0] = KeyboardUsage::KeyboardOo as u8;
-    keys[4].bit_pos[0] = KeyboardUsage::KeyboardYy as u8;
-    keys[5].bit_pos[0] = KeyboardUsage::KeyboardUu as u8;
-    keys[6].bit_pos[0] = KeyboardUsage::KeyboardLl as u8;
-    keys[9].bit_pos[0] = KeyboardUsage::KeyboardJj as u8;
-    keys[14].bit_pos[0] = KeyboardUsage::KeyboardPp as u8;
-    keys[18].bit_pos[0] = KeyboardUsage::KeyboardIi as u8;
 
-    keys[20].key_type = KeyType::Modifier;
-    keys[20].bit_pos[0] = ModifierPosition::LeftShift as u8;
+    // Rows go from top to bottom
+    // First Row left to right
+    keys[7].bit_pos[0] = KeyboardUsage::KeyboardEscape as u8;
+    keys[7].bit_pos[1] = KeyboardUsage::KeyboardEscape as u8;
+    keys[14].bit_pos[0] = KeyboardUsage::KeyboardQq as u8;
+    keys[14].bit_pos[1] = KeyboardUsage::KeyboardF1 as u8;
+    keys[2].bit_pos[0] = KeyboardUsage::KeyboardWw as u8;
+    keys[2].bit_pos[1] = KeyboardUsage::KeyboardF2 as u8;
+    keys[18].bit_pos[0] = KeyboardUsage::KeyboardEe as u8;
+    keys[18].bit_pos[1] = KeyboardUsage::KeyboardF3 as u8;
+    keys[5].bit_pos[0] = KeyboardUsage::KeyboardRr as u8;
+    keys[5].bit_pos[1] = KeyboardUsage::KeyboardF4 as u8;
+    keys[0].bit_pos[0] = KeyboardUsage::KeyboardTt as u8;
+    keys[0].bit_pos[1] = KeyboardUsage::KeyboardTt as u8;
 
-    let mut n: u8 = 128;
+    // Middle Row
+    keys[3].bit_pos[0] = KeyboardUsage::KeyboardCapsLock as u8;
+    keys[3].bit_pos[1] = KeyboardUsage::KeyboardCapsLock as u8;
+    keys[11].bit_pos[0] = KeyboardUsage::KeyboardAa as u8;
+    keys[11].bit_pos[1] = KeyboardUsage::Keyboard1Exclamation as u8;
+    keys[6].bit_pos[0] = KeyboardUsage::KeyboardSs as u8;
+    keys[6].bit_pos[1] = KeyboardUsage::Keyboard2At as u8;
+    keys[1].bit_pos[0] = KeyboardUsage::KeyboardDd as u8;
+    keys[1].bit_pos[1] = KeyboardUsage::Keyboard3Hash as u8;
+    keys[9].bit_pos[0] = KeyboardUsage::KeyboardFf as u8;
+    keys[9].bit_pos[1] = KeyboardUsage::Keyboard4Dollar as u8;
+    keys[4].bit_pos[0] = KeyboardUsage::KeyboardGg as u8;
+    keys[4].bit_pos[1] = KeyboardUsage::Keyboard5Percent as u8;
+
+    // Bottom Row
+    keys[15].key_type = KeyType::Modifier;
+    keys[15].bit_pos[0] = ModifierPosition::LeftShift as u8;
+    keys[15].bit_pos[1] = ModifierPosition::LeftShift as u8;
+    keys[19].bit_pos[0] = KeyboardUsage::KeyboardZz as u8;
+    keys[10].bit_pos[0] = KeyboardUsage::KeyboardXx as u8;
+    keys[13].bit_pos[0] = KeyboardUsage::KeyboardCc as u8;
+    keys[17].bit_pos[0] = KeyboardUsage::KeyboardVv as u8;
+    keys[8].bit_pos[0] = KeyboardUsage::KeyboardBb as u8;
+
+    // Thumb Row
+    keys[12].key_type = KeyType::Modifier;
+    keys[12].bit_pos[0] = ModifierPosition::LeftGui as u8;
+    keys[12].bit_pos[1] = ModifierPosition::LeftGui as u8;
+    keys[16].key_type = KeyType::Layer;
+    keys[20].bit_pos[0] = KeyboardUsage::KeyboardSpacebar as u8;
+    keys[20].bit_pos[1] = KeyboardUsage::KeyboardSpacebar as u8;
 
     loop {
         ws.write(brightness(once(colors::CYAN), 48)).unwrap();
-        n = n.wrapping_add(1);
         for i in 0..6 {
             change_sel(&mut sel0, &mut sel1, &mut sel2, i);
             delay.delay_us(10);
@@ -252,9 +284,9 @@ fn main() -> ! {
 }
 
 fn change_sel<P: PullType>(
-    sel0: &mut Pin<Gpio0, FunctionSio<SioOutput>, P>,
+    sel0: &mut Pin<Gpio2, FunctionSio<SioOutput>, P>,
     sel1: &mut Pin<Gpio1, FunctionSio<SioOutput>, P>,
-    sel2: &mut Pin<Gpio2, FunctionSio<SioOutput>, P>,
+    sel2: &mut Pin<Gpio0, FunctionSio<SioOutput>, P>,
     num: u8,
 ) {
     match num {
@@ -311,6 +343,9 @@ fn generate_report(keys: &mut [Key]) -> (u8, [u8; 11]) {
 
     // Find which layer we need to use by looking at the status of the layer keys
     let mut layer: usize = 0;
+    if keys[16].is_pressed() {
+        layer = 1;
+    }
     for i in 0..keys.len() {
         if keys[i].is_pressed() {
             if keys[i].current_layer == -1 {
@@ -347,22 +382,6 @@ fn generate_report(keys: &mut [Key]) -> (u8, [u8; 11]) {
         }
     }
     (mod_report, nkro_report)
-}
-
-fn wheel(mut wheel_pos: u8) -> RGB8 {
-    wheel_pos = 255 - wheel_pos;
-    if wheel_pos < 85 {
-        // No green in this sector - red and blue only
-        (255 - (wheel_pos * 3), 0, wheel_pos * 3).into()
-    } else if wheel_pos < 170 {
-        // No red in this sector - green and blue only
-        wheel_pos -= 85;
-        (0, wheel_pos * 3, 255 - (wheel_pos * 3)).into()
-    } else {
-        // No blue in this sector - red and green only
-        wheel_pos -= 170;
-        (wheel_pos * 3, 255 - (wheel_pos * 3), 0).into()
-    }
 }
 
 /// This function is called whenever the USB Hardware generates an Interrupt
