@@ -67,6 +67,8 @@ pub enum ModifierPosition {
     (collection = APPLICATION, usage_page = VENDOR_DEFINED_START, usage = 0x01) = {
         key_report0=input;
         key_report1=input;
+        inner_modifier=input;
+        layer_key=input;
         output_buffer=output;
     }
 )]
@@ -74,7 +76,9 @@ pub enum ModifierPosition {
 #[allow(dead_code)]
 pub struct BufferReport {
     pub key_report0: [u8; 32],
-    pub key_report1: [u8; 14],
+    pub key_report1: [u8; 10],
+    pub inner_modifier: u8,
+    pub layer_key: u8,
     pub output_buffer: [u8; 32],
 }
 
@@ -82,7 +86,9 @@ impl BufferReport {
     pub const fn default() -> Self {
         Self {
             key_report0: [0u8; 32],
-            key_report1: [0u8; 14],
+            key_report1: [0u8; 10],
+            inner_modifier: 0u8,
+            layer_key: 0u8,
             output_buffer: [0u8; 32],
         }
     }

@@ -74,7 +74,9 @@ static mut BUFFER: BufferReport = BufferReport::default();
 
 static mut KEYS: [Key; 21] = [Key::default(); 21];
 
-static mut SHIFT: bool = false;
+static mut MOD_REPORT: u8 = 0u8;
+
+static mut LAYER_KEY: u8 = 0u8;
 
 #[entry]
 fn main() -> ! {
@@ -183,7 +185,7 @@ fn main() -> ! {
     //     clocks.system_clock.freq(),
     // );
 
-    let mut keys = [Key::new([0x00; 2], KeyType::Letter, 1400.0, 2000.0); 21];
+    let mut keys = [Key::new([0x00; keys::NUM_LAYERS], KeyType::Letter, 1400.0, 2000.0); 21];
 
     // TODO:: Use EEPROM to initalize the key parameters
     //
@@ -194,15 +196,16 @@ fn main() -> ! {
     keys[7].bit_pos[0] = KeyboardUsage::KeyboardEscape as u8;
     keys[7].bit_pos[1] = KeyboardUsage::KeyboardEscape as u8;
     keys[14].bit_pos[0] = KeyboardUsage::KeyboardQq as u8;
-    keys[14].bit_pos[1] = KeyboardUsage::KeyboardF1 as u8;
+    keys[14].bit_pos[1] = KeyboardUsage::KeyboardBacktickTilde as u8;
+    keys[14].bit_pos[2] = KeyboardUsage::KeyboardF1 as u8;
     keys[2].bit_pos[0] = KeyboardUsage::KeyboardWw as u8;
-    keys[2].bit_pos[1] = KeyboardUsage::KeyboardF2 as u8;
+    keys[2].bit_pos[2] = KeyboardUsage::KeyboardF2 as u8;
     keys[18].bit_pos[0] = KeyboardUsage::KeyboardEe as u8;
-    keys[18].bit_pos[1] = KeyboardUsage::KeyboardF3 as u8;
+    keys[18].bit_pos[2] = KeyboardUsage::KeyboardF3 as u8;
     keys[5].bit_pos[0] = KeyboardUsage::KeyboardRr as u8;
-    keys[5].bit_pos[1] = KeyboardUsage::KeyboardF4 as u8;
+    keys[5].bit_pos[2] = KeyboardUsage::KeyboardF4 as u8;
     keys[0].bit_pos[0] = KeyboardUsage::KeyboardTt as u8;
-    keys[0].bit_pos[1] = KeyboardUsage::KeyboardTt as u8;
+    keys[0].bit_pos[2] = KeyboardUsage::KeyboardF5 as u8;
 
     // Middle Row
     keys[3].bit_pos[0] = KeyboardUsage::KeyboardCapsLock as u8;
@@ -250,22 +253,11 @@ fn main() -> ! {
                 keys[20].update_buf(adc.read(&mut a0).unwrap_or(69));
             }
         }
-        // let mut buf = [0u8; 22];
-        // let mut read = false;
-        // loop {
-        //     match i2c.read(0x72u8, &mut buf) {
-        //         Ok(_) => {
-        //             if buf[0] == 0x7 {
-        //                 read = true;
-        //                 break;
-        //             }
-        //         }
-        //         Err(_) => break,
-        //     }
-        // }
         let report = generate_report(&mut keys);
         critical_section::with(|_| unsafe {
-            (REPORT.modifier, REPORT.nkro_keycodes) = report;
+            (REPORT.modifier, BUFFER.layer_key, REPORT.nkro_keycodes) = report;
+            BUFFER.inner_modifier = REPORT.modifier;
+            REPORT.modifier |= MOD_REPORT;
             for i in 0..16 {
                 let bytes = keys[usize::from(i as u16)].get_buf().to_be_bytes();
                 BUFFER.key_report0[usize::from(i as u16 * 2)] = bytes[0];
@@ -277,7 +269,6 @@ fn main() -> ! {
                 BUFFER.key_report1[usize::from((i as u16 - 16) * 2)] = bytes[0];
                 BUFFER.key_report1[usize::from((i as u16 - 16) * 2 + 1)] = bytes[1];
             }
-            BUFFER.key_report1[10] = SHIFT as u8;
         });
         asm::wfi();
     }
@@ -329,22 +320,22 @@ fn change_sel<P: PullType>(
 }
 
 // Returns the values that can be used in the keyboard report. First value in the tuple
-// is the modifier keys while the second is the nkro keycodes
-fn generate_report(keys: &mut [Key]) -> (u8, [u8; 11]) {
+// is the modifier keys, second being the layer key, while the third is the nkro keycodes
+fn generate_report(keys: &mut [Key]) -> (u8, u8, [u8; 11]) {
     let mut mod_report = 0u8;
     let mut nkro_report = [0u8; 11];
-
-    unsafe {
-        if SHIFT {
-            let mask = 1 << 1;
-            mod_report |= mask;
-        }
-    }
+    let mut layer_key = 0u8;
 
     // Find which layer we need to use by looking at the status of the layer keys
     let mut layer: usize = 0;
+    critical_section::with(|_| unsafe {
+        if LAYER_KEY != 0 {
+            layer = 2;
+        }
+    });
     if keys[16].is_pressed() {
         layer = 1;
+        layer_key = 1;
     }
     for i in 0..keys.len() {
         if keys[i].is_pressed() {
@@ -381,7 +372,7 @@ fn generate_report(keys: &mut [Key]) -> (u8, [u8; 11]) {
             keys[i].current_layer = -1;
         }
     }
-    (mod_report, nkro_report)
+    (mod_report, layer_key, nkro_report)
 }
 
 /// This function is called whenever the USB Hardware generates an Interrupt
@@ -397,14 +388,16 @@ unsafe fn USBCTRL_IRQ() {
         USB_HID.as_mut().unwrap().poll();
         USB_HID2.as_mut().unwrap().poll();
     }
+    let mut buf = [0u8; 64];
+    USB_HID2.as_mut().unwrap().pull_raw_output(&mut buf).ok();
+    if buf[0] == 5 {
+        MOD_REPORT = buf[1];
+        LAYER_KEY = buf[2];
+    }
+    REPORT.modifier |= MOD_REPORT;
     USB_HID.as_mut().map(|hid| hid.push_input(&REPORT));
     USB_HID.as_mut().unwrap().pull_raw_output(&mut [0; 64]).ok();
     USB_HID2.as_mut().map(|hid| hid.push_input(&BUFFER));
-    let mut buf = [0u8; 32];
-    USB_HID2.as_mut().unwrap().pull_raw_output(&mut buf).ok();
-    if buf[0] == 7 {
-        SHIFT = !SHIFT;
-    }
 }
 
 // End of file

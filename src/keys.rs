@@ -3,7 +3,7 @@ const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.85;
 const BUFFER_SIZE: u16 = 2;
 const TOLERANCE_SCALE: f32 = 0.075;
 
-const NUM_LAYERS: usize = 2;
+pub const NUM_LAYERS: usize = 3;
 
 #[derive(Copy, Clone)]
 pub enum KeyType {
@@ -20,7 +20,7 @@ pub struct Key {
     min_distance_up: u32,
     min_distance_down: u32,
     tolerance: u32,
-    pub bit_pos: [u8; 2], // Num represents pos to toggle in nkro report. Index indicates layer
+    pub bit_pos: [u8; NUM_LAYERS], // Num represents pos to toggle in nkro report. Index indicates layer
     is_pressed: bool,
     wooting: bool,
     pub key_type: KeyType,
