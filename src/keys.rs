@@ -2,14 +2,21 @@ const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.90;
 const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.85;
 const BUFFER_SIZE: u16 = 2;
 const TOLERANCE_SCALE: f32 = 0.075;
+const DOUBLE_TIME_BUFFER: u16 = 250;
 
 pub const NUM_LAYERS: usize = 3;
 
 #[derive(Copy, Clone)]
-pub enum KeyType {
+pub enum ScanCodeType {
     Letter,
     Modifier,
     Layer,
+}
+
+#[derive(Copy, Clone)]
+pub enum KeyType {
+    Normal,
+    DoubleToHold,
 }
 
 #[derive(Copy, Clone)]
@@ -23,9 +30,14 @@ pub struct Key {
     pub bit_pos: [u8; NUM_LAYERS], // Num represents pos to toggle in nkro report. Index indicates layer
     is_pressed: bool,
     wooting: bool,
-    pub key_type: KeyType,
+    pub scan_code_type: ScanCodeType,
     pub current_layer: i8, // When a key is held, it will hold it's layer even when the a different
-                           // layer key is pressed. This variable will keep track of that layer
+    // layer key is pressed. This variable will keep track of that layer
+    pub key_type: KeyType,
+    was_pressed: bool,
+    time: u16,
+    double_state: bool,
+    pub hold: bool,
 }
 
 impl Key {
@@ -40,12 +52,18 @@ impl Key {
             bit_pos: [0x00; NUM_LAYERS],
             is_pressed: false,
             wooting: false,
-            key_type: KeyType::Letter,
+            scan_code_type: ScanCodeType::Letter,
             current_layer: -1,
+            key_type: KeyType::Normal,
+            was_pressed: false,
+            time: 0,
+            double_state: false,
+            hold: false,
         }
     }
     pub(crate) fn new(
         bit_pos: [u8; NUM_LAYERS],
+        scan_code_type: ScanCodeType,
         key_type: KeyType,
         lowest_point: f32,
         highest_point: f32,
@@ -65,8 +83,13 @@ impl Key {
             bit_pos,
             is_pressed: false,
             wooting: false,
+            scan_code_type,
             key_type,
             current_layer: -1,
+            was_pressed: false,
+            time: 0,
+            double_state: false,
+            hold: false,
         }
     }
 
@@ -94,8 +117,11 @@ impl Key {
         }
     }
 
-    pub fn is_pressed(&self) -> bool {
-        self.is_pressed
+    pub fn is_pressed(&mut self) -> bool {
+        match self.key_type {
+            KeyType::Normal => self.is_pressed,
+            KeyType::DoubleToHold => self.double_is_pressed(),
+        }
     }
 
     pub fn get_buf(&self) -> u16 {
@@ -104,5 +130,41 @@ impl Key {
             sum += buf as u16;
         }
         sum / BUFFER_SIZE
+    }
+
+    pub fn double_is_pressed(&mut self) -> bool {
+        if self.hold {
+            true
+        } else if self.time > DOUBLE_TIME_BUFFER {
+            if !self.is_pressed {
+                self.double_state = false;
+                self.time = 0;
+                self.was_pressed = false;
+                false
+            } else {
+                true
+            }
+        } else if self.double_state {
+            if self.is_pressed {
+                self.hold = true;
+                self.double_state = false;
+                self.time = 0;
+                self.was_pressed = false;
+                true
+            } else {
+                self.time += 1;
+                false
+            }
+        } else {
+            if self.was_pressed && !self.is_pressed {
+                self.double_state = true;
+                self.time = 1;
+                self.was_pressed = false;
+                false
+            } else {
+                self.was_pressed = self.is_pressed;
+                self.is_pressed
+            }
+        }
     }
 }

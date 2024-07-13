@@ -24,8 +24,8 @@ use usbd_hid::descriptor::{
             #[item_settings data,array,absolute]
             keycodes=input;
         };
-        (usage_page = KEYBOARD, usage_min = 0x00, usage_max = 0x52) = {
-            #[packed_bits 82]
+        (usage_page = KEYBOARD, usage_min = 0x00, usage_max = 0x53) = {
+            #[packed_bits 83]
             #[item_settings data,variable,absolute]
             nkro_keycodes=input;
         };
@@ -69,6 +69,7 @@ pub enum ModifierPosition {
         key_report1=input;
         inner_modifier=input;
         layer_key=input;
+        key_pressed=input;
         output_buffer=output;
     }
 )]
@@ -79,6 +80,7 @@ pub struct BufferReport {
     pub key_report1: [u8; 10],
     pub inner_modifier: u8,
     pub layer_key: u8,
+    pub key_pressed: u8,
     pub output_buffer: [u8; 32],
 }
 
@@ -89,6 +91,7 @@ impl BufferReport {
             key_report1: [0u8; 10],
             inner_modifier: 0u8,
             layer_key: 0u8,
+            key_pressed: 0u8,
             output_buffer: [0u8; 32],
         }
     }

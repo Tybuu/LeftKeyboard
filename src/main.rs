@@ -25,7 +25,7 @@ use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::OutputPin;
 use hal::pio::PIOExt;
-use keys::{Key, KeyType};
+use keys::{Key, KeyType, ScanCodeType};
 use panic_probe as _;
 use report::{BufferReport, KeyboardReportNKRO};
 
@@ -77,6 +77,8 @@ static mut KEYS: [Key; 21] = [Key::default(); 21];
 static mut MOD_REPORT: u8 = 0u8;
 
 static mut LAYER_KEY: u8 = 0u8;
+
+static mut KEY_PRESSED: u8 = 0;
 
 #[entry]
 fn main() -> ! {
@@ -185,7 +187,13 @@ fn main() -> ! {
     //     clocks.system_clock.freq(),
     // );
 
-    let mut keys = [Key::new([0x00; keys::NUM_LAYERS], KeyType::Letter, 1400.0, 2000.0); 21];
+    let mut keys = [Key::new(
+        [0x00; keys::NUM_LAYERS],
+        ScanCodeType::Letter,
+        KeyType::Normal,
+        1400.0,
+        2000.0,
+    ); 21];
 
     // TODO:: Use EEPROM to initalize the key parameters
     //
@@ -222,7 +230,7 @@ fn main() -> ! {
     keys[4].bit_pos[1] = KeyboardUsage::Keyboard5Percent as u8;
 
     // Bottom Row
-    keys[15].key_type = KeyType::Modifier;
+    keys[15].scan_code_type = ScanCodeType::Modifier;
     keys[15].bit_pos[0] = ModifierPosition::LeftShift as u8;
     keys[15].bit_pos[1] = ModifierPosition::LeftShift as u8;
     keys[19].bit_pos[0] = KeyboardUsage::KeyboardZz as u8;
@@ -232,15 +240,16 @@ fn main() -> ! {
     keys[8].bit_pos[0] = KeyboardUsage::KeyboardBb as u8;
 
     // Thumb Row
-    keys[12].key_type = KeyType::Modifier;
+    keys[12].scan_code_type = ScanCodeType::Modifier;
+    keys[12].key_type = KeyType::DoubleToHold;
     keys[12].bit_pos[0] = ModifierPosition::LeftGui as u8;
     keys[12].bit_pos[1] = ModifierPosition::LeftGui as u8;
-    keys[16].key_type = KeyType::Layer;
+    keys[16].scan_code_type = ScanCodeType::Layer;
     keys[20].bit_pos[0] = KeyboardUsage::KeyboardSpacebar as u8;
     keys[20].bit_pos[1] = KeyboardUsage::KeyboardSpacebar as u8;
 
+    ws.write(brightness(once(colors::CYAN), 48)).unwrap();
     loop {
-        ws.write(brightness(once(colors::CYAN), 48)).unwrap();
         for i in 0..6 {
             change_sel(&mut sel0, &mut sel1, &mut sel2, i);
             delay.delay_us(10);
@@ -255,7 +264,12 @@ fn main() -> ! {
         }
         let report = generate_report(&mut keys);
         critical_section::with(|_| unsafe {
-            (REPORT.modifier, BUFFER.layer_key, REPORT.nkro_keycodes) = report;
+            (
+                REPORT.modifier,
+                BUFFER.layer_key,
+                BUFFER.key_pressed,
+                REPORT.nkro_keycodes,
+            ) = report;
             BUFFER.inner_modifier = REPORT.modifier;
             REPORT.modifier |= MOD_REPORT;
             for i in 0..16 {
@@ -320,11 +334,13 @@ fn change_sel<P: PullType>(
 }
 
 // Returns the values that can be used in the keyboard report. First value in the tuple
-// is the modifier keys, second being the layer key, while the third is the nkro keycodes
-fn generate_report(keys: &mut [Key]) -> (u8, u8, [u8; 11]) {
+// is the modifier keys, second being the layer key, the third being if a key is pressed, while the last is the nkro keycodes
+fn generate_report(keys: &mut [Key]) -> (u8, u8, u8, [u8; 11]) {
     let mut mod_report = 0u8;
     let mut nkro_report = [0u8; 11];
     let mut layer_key = 0u8;
+
+    let mut key_pressed = false;
 
     // Find which layer we need to use by looking at the status of the layer keys
     let mut layer: usize = 0;
@@ -337,42 +353,44 @@ fn generate_report(keys: &mut [Key]) -> (u8, u8, [u8; 11]) {
         layer = 1;
         layer_key = 1;
     }
+
     for i in 0..keys.len() {
         if keys[i].is_pressed() {
-            if keys[i].current_layer == -1 {
-                match keys[i].key_type {
-                    KeyType::Letter => {
-                        let index = keys[i].bit_pos[layer] / 8;
-                        let mask = 1 << (keys[i].bit_pos[layer] % 8);
-                        nkro_report[usize::from(index)] |= mask;
-                    }
-                    KeyType::Modifier => {
-                        let mask = 1 << (keys[i].bit_pos[layer] % 8);
-                        mod_report |= mask;
-                    }
-                    KeyType::Layer => {}
-                }
-                keys[i].current_layer = layer as i8;
-            } else {
-                let layer = usize::from(keys[i].current_layer as u8);
-                match keys[i].key_type {
-                    KeyType::Letter => {
-                        let index = keys[i].bit_pos[layer] / 8;
-                        let mask = 1 << (keys[i].bit_pos[layer] % 8);
-                        nkro_report[usize::from(index)] |= mask;
-                    }
-                    KeyType::Modifier => {
-                        let mask = 1 << (keys[i].bit_pos[layer] % 8);
-                        mod_report |= mask;
-                    }
-                    KeyType::Layer => {}
-                }
+            let mut current_layer = layer;
+            if keys[i].current_layer != -1 {
+                current_layer = keys[i].current_layer as usize;
             }
+            match keys[i].scan_code_type {
+                ScanCodeType::Letter => {
+                    let index = keys[i].bit_pos[current_layer] / 8;
+                    let mask = 1 << (keys[i].bit_pos[current_layer] % 8);
+                    key_pressed = true;
+                    nkro_report[usize::from(index)] |= mask;
+                }
+                ScanCodeType::Modifier => {
+                    let mask = 1 << (keys[i].bit_pos[current_layer] % 8);
+                    mod_report |= mask;
+                }
+                ScanCodeType::Layer => {}
+            }
+            keys[i].current_layer = current_layer as i8;
         } else {
             keys[i].current_layer = -1;
         }
     }
-    (mod_report, layer_key, nkro_report)
+    critical_section::with(|_| unsafe {
+        if key_pressed || KEY_PRESSED == 1 {
+            for key in keys {
+                match key.key_type {
+                    KeyType::Normal => {}
+                    KeyType::DoubleToHold => {
+                        key.hold = false;
+                    }
+                };
+            }
+        }
+    });
+    (mod_report, layer_key, key_pressed as u8, nkro_report)
 }
 
 /// This function is called whenever the USB Hardware generates an Interrupt
@@ -393,6 +411,7 @@ unsafe fn USBCTRL_IRQ() {
     if buf[0] == 5 {
         MOD_REPORT = buf[1];
         LAYER_KEY = buf[2];
+        KEY_PRESSED = buf[3];
     }
     REPORT.modifier |= MOD_REPORT;
     USB_HID.as_mut().map(|hid| hid.push_input(&REPORT));
