@@ -155,7 +155,10 @@ fn main() -> ! {
             .manufacturer("tybeast")
             .product("Left Tybeast Ones")])
         .unwrap()
-        .device_class(3) // from: https://www.usb.org/defined-class-codes
+        .device_class(0xef) // from: https://www.usb.org/defined-class-codes
+        .device_sub_class(0x02)
+        .device_protocol(0x01)
+        .composite_with_iads()
         .build();
     unsafe {
         // Note (safety): This is safe as interrupts haven't been started yet
@@ -202,7 +205,7 @@ fn main() -> ! {
     // Rows go from top to bottom
     // First Row left to right
     keys[7].bit_pos[0] = KeyboardUsage::KeyboardEscape as u8;
-    keys[7].bit_pos[1] = KeyboardUsage::KeyboardEscape as u8;
+    keys[7].bit_pos[1] = KeyboardUsage::KeyboardTab as u8;
     keys[14].bit_pos[0] = KeyboardUsage::KeyboardQq as u8;
     keys[14].bit_pos[1] = KeyboardUsage::KeyboardBacktickTilde as u8;
     keys[14].bit_pos[2] = KeyboardUsage::KeyboardF1 as u8;
@@ -216,8 +219,9 @@ fn main() -> ! {
     keys[0].bit_pos[2] = KeyboardUsage::KeyboardF5 as u8;
 
     // Middle Row
-    keys[3].bit_pos[0] = KeyboardUsage::KeyboardCapsLock as u8;
-    keys[3].bit_pos[1] = KeyboardUsage::KeyboardCapsLock as u8;
+    keys[3].scan_code_type = ScanCodeType::Modifier;
+    keys[3].bit_pos[0] = ModifierPosition::LeftCtrl as u8;
+    keys[3].bit_pos[1] = ModifierPosition::LeftCtrl as u8;
     keys[11].bit_pos[0] = KeyboardUsage::KeyboardAa as u8;
     keys[11].bit_pos[1] = KeyboardUsage::Keyboard1Exclamation as u8;
     keys[6].bit_pos[0] = KeyboardUsage::KeyboardSs as u8;
@@ -272,17 +276,17 @@ fn main() -> ! {
             ) = report;
             BUFFER.inner_modifier = REPORT.modifier;
             REPORT.modifier |= MOD_REPORT;
-            for i in 0..16 {
-                let bytes = keys[usize::from(i as u16)].get_buf().to_be_bytes();
-                BUFFER.key_report0[usize::from(i as u16 * 2)] = bytes[0];
-                BUFFER.key_report0[usize::from(i as u16 * 2 + 1)] = bytes[1];
-            }
-
-            for i in 16..21 {
-                let bytes = keys[usize::from(i as u16)].get_buf().to_be_bytes();
-                BUFFER.key_report1[usize::from((i as u16 - 16) * 2)] = bytes[0];
-                BUFFER.key_report1[usize::from((i as u16 - 16) * 2 + 1)] = bytes[1];
-            }
+            // for i in 0..16 {
+            //     let bytes = keys[usize::from(i as u16)].get_buf().to_be_bytes();
+            //     BUFFER.key_report0[usize::from(i as u16 * 2)] = bytes[0];
+            //     BUFFER.key_report0[usize::from(i as u16 * 2 + 1)] = bytes[1];
+            // }
+            //
+            // for i in 16..21 {
+            //     let bytes = keys[usize::from(i as u16)].get_buf().to_be_bytes();
+            //     BUFFER.key_report1[usize::from((i as u16 - 16) * 2)] = bytes[0];
+            //     BUFFER.key_report1[usize::from((i as u16 - 16) * 2 + 1)] = bytes[1];
+            // }
         });
         asm::wfi();
     }
