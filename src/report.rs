@@ -1,79 +1,109 @@
-use usbd_hid::descriptor::gen_hid_descriptor;
-use usbd_hid::descriptor::{
-    generator_prelude::{Serialize, SerializeTuple, SerializedDescriptor, Serializer},
-    AsInputReport,
+use crate::{
+    hid::{BufferReport, KeyboardReportNKRO},
+    keys::{Key, ScanCodeType},
 };
-
-#[gen_hid_descriptor(
-    (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = KEYBOARD) = {
-        (usage_page = KEYBOARD, usage_min = 0xE0, usage_max = 0xE7) = {
-            #[packed_bits 8]
-            #[item_settings data,variable,absolute]
-            modifier=input;
-        };
-        (usage_page = KEYBOARD, usage_min = 0x00, usage_max = 0x53) = {
-            #[packed_bits 83]
-            #[item_settings data,variable,absolute]
-            nkro_keycodes=input;
-        };
+fn set_bit(num: u8, bit: u8, pos: u8) -> u8 {
+    let mask = 1 << pos;
+    if bit == 1 {
+        num | mask
+    } else {
+        num & !mask
     }
-)]
-#[allow(dead_code)]
-pub struct KeyboardReportNKRO {
-    pub modifier: u8,
-    pub nkro_keycodes: [u8; 11],
 }
 
-impl KeyboardReportNKRO {
+pub struct Report {
+    report: KeyboardReportNKRO,
+    inner_layer: usize,
+    current_layer: usize,
+    inner_modifier: u8,
+}
+
+impl Report {
     pub const fn default() -> Self {
         Self {
-            modifier: 0,
-            nkro_keycodes: [0; 11],
+            report: KeyboardReportNKRO::default(),
+            inner_layer: 0,
+            inner_modifier: 0,
+            current_layer: 0,
         }
     }
-}
 
-pub enum ModifierPosition {
-    LeftCtrl = 0,
-    LeftShift = 1,
-    LeftAlt = 2,
-    LeftGui = 3,
-    RightCtrl = 4,
-    RightShift = 5,
-    RightAlt = 6,
-    RightGui = 7,
-}
+    pub fn generate_report(
+        &mut self,
+        keys: &mut [Key],
+        external_layer: usize,
+        external_modifier: u8,
+    ) -> Option<(KeyboardReportNKRO, BufferReport)> {
+        let layer = self.current_layer;
+        let mut changed = false;
+        let mut layer_pressed = false;
+        keys.iter_mut()
+            .for_each(|key| match key.scan_code_type[layer] {
+                ScanCodeType::Layer => {
+                    if key.is_pressed() {
+                        self.inner_layer = key.bit_pos[layer] as usize;
+                        self.current_layer = key.bit_pos[layer] as usize;
+                        layer_pressed = true;
+                    }
+                }
+                _ => {}
+            });
+        if (external_layer > 0 && !layer_pressed) || external_layer > self.inner_layer {
+            self.current_layer = external_layer;
+        } else if !layer_pressed {
+            self.inner_layer = 0;
+            self.current_layer = 0;
+        }
 
-#[gen_hid_descriptor(
-    (collection = APPLICATION, usage_page = VENDOR_DEFINED_START, usage = 0x01) = {
-        key_report0=input;
-        key_report1=input;
-        inner_modifier=input;
-        layer_key=input;
-        key_pressed=input;
-        output_buffer=output;
-    }
-)]
-// The max for a single array is 32 elements
-#[allow(dead_code)]
-pub struct BufferReport {
-    pub key_report0: [u8; 32],
-    pub key_report1: [u8; 10],
-    pub inner_modifier: u8,
-    pub layer_key: u8,
-    pub key_pressed: u8,
-    pub output_buffer: [u8; 32],
-}
+        if layer != self.current_layer {
+            changed = true;
+        }
 
-impl BufferReport {
-    pub const fn default() -> Self {
-        Self {
-            key_report0: [0u8; 32],
-            key_report1: [0u8; 10],
-            inner_modifier: 0u8,
-            layer_key: 0u8,
-            key_pressed: 0u8,
-            output_buffer: [0u8; 32],
+        keys.iter_mut().for_each(|key| {
+            let val = if key.is_pressed() { 1 } else { 0 };
+            let mut current_layer = self.current_layer;
+            if key.current_layer != -1 {
+                current_layer = key.current_layer as usize;
+            }
+            match key.scan_code_type[current_layer] {
+                ScanCodeType::Letter => {
+                    let n_idx = (key.bit_pos[current_layer] / 8) as usize;
+                    let b_idx = key.bit_pos[current_layer] % 8;
+                    let res = set_bit(self.report.nkro_keycodes[n_idx], val, b_idx);
+                    if res != self.report.nkro_keycodes[n_idx] {
+                        changed = true;
+                        self.report.nkro_keycodes[n_idx] = res;
+                    }
+                }
+                ScanCodeType::Modifier => {
+                    let b_idx = key.bit_pos[current_layer] % 8;
+                    let res = set_bit(self.report.modifier, val, b_idx);
+                    self.inner_modifier = set_bit(self.inner_modifier, val, b_idx);
+                    if res != self.report.modifier {
+                        changed = true;
+                        self.report.modifier = res;
+                    }
+                }
+                _ => {}
+            }
+            if val == 1 {
+                key.current_layer = current_layer as i8;
+            } else {
+                key.current_layer = -1;
+            }
+        });
+        let res = self.inner_modifier | external_modifier;
+        if res != self.report.modifier {
+            changed = true;
+            self.report.modifier = res;
+        }
+        if changed {
+            let mut buffer = BufferReport::default();
+            buffer.layer_key = self.inner_layer as u8;
+            buffer.inner_modifier = self.inner_modifier;
+            Some((self.report.clone(), buffer.clone()))
+        } else {
+            None
         }
     }
 }
