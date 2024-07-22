@@ -77,12 +77,7 @@ impl Report {
                 }
                 ScanCodeType::Modifier => {
                     let b_idx = key.bit_pos[current_layer] % 8;
-                    let res = set_bit(self.report.modifier, val, b_idx);
                     self.inner_modifier = set_bit(self.inner_modifier, val, b_idx);
-                    if res != self.report.modifier {
-                        changed = true;
-                        self.report.modifier = res;
-                    }
                 }
                 _ => {}
             }
@@ -101,7 +96,7 @@ impl Report {
             let mut buffer = BufferReport::default();
             buffer.layer_key = self.inner_layer as u8;
             buffer.inner_modifier = self.inner_modifier;
-            Some((self.report.clone(), buffer.clone()))
+            Some((self.report, buffer))
         } else {
             None
         }
