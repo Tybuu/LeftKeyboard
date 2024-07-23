@@ -28,8 +28,8 @@ use hal::{
     pio::PIOExt,
 };
 use keyboard::{
-    hid::ModifierPosition,
-    keys::{Key, ScanCodeType},
+    codes::KeyboardCodes,
+    keys::{Key, NUM_LAYERS},
     report::Report,
 };
 use keyboard::{
@@ -77,16 +77,7 @@ static mut USB_HID: Option<HIDClass<hal::usb::UsbBus>> = None;
 
 static mut USB_HID2: Option<HIDClass<hal::usb::UsbBus>> = None;
 
-static mut REPORT: KeyboardReportNKRO = KeyboardReportNKRO::default();
-
-static mut BUFFER: BufferReport = BufferReport::default();
-
-static mut KEYS: [Key; 21] = [Key::default(); 21];
-
-static mut MOD_REPORT: u8 = 0u8;
-
-static mut EXTERNAL_LAYER: u8 = 0u8;
-
+static mut SLAVE_KEY_STATES: [u8; 3] = [0u8; 3];
 #[entry]
 fn main() -> ! {
     info!("Program start");
@@ -167,6 +158,7 @@ fn main() -> ! {
         .device_protocol(0x01)
         .composite_with_iads()
         .build();
+
     unsafe {
         // Note (safety): This is safe as interrupts haven't been started yet
         USB_DEVICE = Some(usb_dev);
@@ -193,86 +185,121 @@ fn main() -> ! {
     let mut order: [u8; NUM_KEYS as usize] = [
         7, 14, 2, 18, 5, 0, 3, 11, 6, 1, 9, 4, 15, 19, 10, 13, 17, 8, 12, 16, 20,
     ];
-
     find_order(&mut order);
-    let mut keys = [Key::new(
-        [0x00; keys::NUM_LAYERS],
-        [ScanCodeType::Letter; keys::NUM_LAYERS],
-        1400.0,
-        2000.0,
-    ); 21];
+    let mut keys = [Key::default(); 42];
 
-    // Initialize Keys
+    // Initialize Keys for Left Keys
     // Rows go from top to bottom
     // First Row left to right
-    keys[0].bit_pos[0] = KeyboardUsage::KeyboardEscape as u8;
-    keys[0].bit_pos[1] = KeyboardUsage::KeyboardTab as u8;
-    keys[1].bit_pos[0] = KeyboardUsage::KeyboardQq as u8;
-    keys[1].bit_pos[1] = KeyboardUsage::KeyboardBacktickTilde as u8;
-    keys[1].bit_pos[2] = KeyboardUsage::KeyboardF1 as u8;
-    keys[2].bit_pos[0] = KeyboardUsage::KeyboardWw as u8;
-    keys[2].bit_pos[2] = KeyboardUsage::KeyboardF2 as u8;
-    keys[3].bit_pos[0] = KeyboardUsage::KeyboardEe as u8;
-    keys[3].bit_pos[2] = KeyboardUsage::KeyboardF3 as u8;
-    keys[4].bit_pos[0] = KeyboardUsage::KeyboardRr as u8;
-    keys[4].bit_pos[2] = KeyboardUsage::KeyboardF4 as u8;
-    keys[5].bit_pos[0] = KeyboardUsage::KeyboardTt as u8;
-    keys[5].bit_pos[2] = KeyboardUsage::KeyboardF5 as u8;
+    // keys[0].set_normal(KeyboardCodes::KeyboardEscape, false, 0);
+    keys[0].set_normal(KeyboardCodes::KeyboardTab, false, 0);
+    keys[1].set_normal(KeyboardCodes::KeyboardQq, false, 0);
+    keys[1].set_normal(KeyboardCodes::KeyboardBacktickTilde, false, 1);
+    keys[1].set_normal(KeyboardCodes::KeyboardF1, false, 2);
+    keys[2].set_normal(KeyboardCodes::KeyboardWw, false, 0);
+    keys[2].set_normal(KeyboardCodes::KeyboardF2, false, 2);
+    keys[3].set_normal(KeyboardCodes::KeyboardEe, false, 0);
+    keys[3].set_normal(KeyboardCodes::KeyboardF3, false, 2);
+
+    keys[4].set_normal(KeyboardCodes::KeyboardRr, false, 0);
+    keys[4].set_normal(KeyboardCodes::KeyboardF4, false, 2);
+    keys[5].set_normal(KeyboardCodes::KeyboardTt, false, 0);
+    keys[5].set_normal(KeyboardCodes::KeyboardF5, false, 2);
 
     // Middle Row
-    keys[6].scan_code_type[0] = ScanCodeType::Modifier;
-    keys[6].scan_code_type[1] = ScanCodeType::Modifier;
-    keys[6].scan_code_type[2] = ScanCodeType::Modifier;
-    keys[6].bit_pos[0] = ModifierPosition::LeftCtrl as u8;
-    keys[6].bit_pos[1] = ModifierPosition::LeftCtrl as u8;
-    keys[7].bit_pos[0] = KeyboardUsage::KeyboardAa as u8;
-    keys[7].bit_pos[1] = KeyboardUsage::Keyboard1Exclamation as u8;
-    keys[8].bit_pos[0] = KeyboardUsage::KeyboardSs as u8;
-    keys[8].bit_pos[1] = KeyboardUsage::Keyboard2At as u8;
-    keys[9].bit_pos[0] = KeyboardUsage::KeyboardDd as u8;
-    keys[9].bit_pos[1] = KeyboardUsage::Keyboard3Hash as u8;
-    keys[10].bit_pos[0] = KeyboardUsage::KeyboardFf as u8;
-    keys[10].bit_pos[1] = KeyboardUsage::Keyboard4Dollar as u8;
-    keys[11].bit_pos[0] = KeyboardUsage::KeyboardGg as u8;
-    keys[11].bit_pos[1] = KeyboardUsage::Keyboard5Percent as u8;
+    // keys[6].set_normal_all([KeyboardCodes::KeyboardLeftControl; NUM_LAYERS], false);
+    keys[6].set_hold(
+        KeyboardCodes::KeyboardEscape,
+        KeyboardCodes::KeyboardLeftControl,
+        false,
+        false,
+        0,
+    );
+    keys[7].set_normal(KeyboardCodes::KeyboardAa, false, 0);
+    keys[7].set_normal(KeyboardCodes::Keyboard1Exclamation, false, 1);
+    keys[8].set_normal(KeyboardCodes::KeyboardSs, false, 0);
+    keys[8].set_normal(KeyboardCodes::Keyboard2At, false, 1);
+    keys[9].set_normal(KeyboardCodes::KeyboardDd, false, 0);
+    keys[9].set_normal(KeyboardCodes::Keyboard3Hash, false, 1);
+    keys[10].set_normal(KeyboardCodes::KeyboardFf, false, 0);
+    keys[10].set_normal(KeyboardCodes::Keyboard4Dollar, false, 1);
+    keys[11].set_normal(KeyboardCodes::KeyboardGg, false, 0);
+    keys[11].set_normal(KeyboardCodes::Keyboard5Percent, false, 1);
 
     // Bottom Row
-    keys[12].scan_code_type[0] = ScanCodeType::Modifier;
-    keys[12].scan_code_type[1] = ScanCodeType::Modifier;
-    keys[12].scan_code_type[2] = ScanCodeType::Modifier;
-    keys[12].bit_pos[0] = ModifierPosition::LeftShift as u8;
-    keys[12].bit_pos[1] = ModifierPosition::LeftShift as u8;
-    keys[12].bit_pos[2] = ModifierPosition::LeftShift as u8;
-    keys[13].bit_pos[0] = KeyboardUsage::KeyboardZz as u8;
-    keys[14].bit_pos[0] = KeyboardUsage::KeyboardXx as u8;
-    keys[15].bit_pos[0] = KeyboardUsage::KeyboardCc as u8;
-    keys[16].bit_pos[0] = KeyboardUsage::KeyboardVv as u8;
-    keys[17].bit_pos[0] = KeyboardUsage::KeyboardBb as u8;
+    keys[12].set_normal_all([KeyboardCodes::KeyboardLeftShift; NUM_LAYERS], false);
+    keys[13].set_normal(KeyboardCodes::KeyboardZz, false, 0);
+    keys[14].set_normal(KeyboardCodes::KeyboardXx, false, 0);
+    keys[15].set_normal(KeyboardCodes::KeyboardCc, false, 0);
+    keys[16].set_normal(KeyboardCodes::KeyboardVv, false, 0);
+    keys[17].set_normal(KeyboardCodes::KeyboardBb, false, 0);
 
     // Thumb Row
-    keys[18].scan_code_type[0] = ScanCodeType::Modifier;
-    keys[18].scan_code_type[1] = ScanCodeType::Modifier;
-    keys[18].scan_code_type[2] = ScanCodeType::Modifier;
-    keys[18].bit_pos[0] = ModifierPosition::LeftGui as u8;
-    keys[18].bit_pos[1] = ModifierPosition::LeftGui as u8;
-    keys[19].scan_code_type[0] = ScanCodeType::Layer;
-    keys[19].scan_code_type[1] = ScanCodeType::Layer;
-    keys[19].scan_code_type[2] = ScanCodeType::Layer;
-    keys[19].bit_pos[0] = 1;
-    keys[19].bit_pos[1] = 1;
-    keys[19].bit_pos[2] = 1;
-    keys[20].bit_pos[0] = KeyboardUsage::KeyboardSpacebar as u8;
-    keys[20].bit_pos[1] = KeyboardUsage::KeyboardSpacebar as u8;
+    keys[18].set_normal_all([KeyboardCodes::KeyboardLeftGUI; NUM_LAYERS], false);
+    keys[19].set_normal_all([KeyboardCodes::Layer1; NUM_LAYERS], false);
+    keys[20].set_normal_all([KeyboardCodes::KeyboardSpacebar; NUM_LAYERS], false);
+
+    // Right Keyboard
+    // Top Row
+    //
+    keys[21].set_normal(KeyboardCodes::KeyboardYy, false, 0);
+    keys[21].set_normal(KeyboardCodes::KeyboardDashUnderscore, false, 1);
+    keys[21].set_normal(KeyboardCodes::KeyboardF6, false, 2);
+    keys[22].set_normal(KeyboardCodes::KeyboardUu, false, 0);
+    keys[22].set_normal(KeyboardCodes::KeyboardEqualPlus, false, 1);
+    keys[22].set_normal(KeyboardCodes::KeyboardF7, false, 2);
+    keys[23].set_normal(KeyboardCodes::KeyboardIi, false, 0);
+    keys[23].set_normal(KeyboardCodes::KeyboardOpenBracketBrace, false, 1);
+    keys[23].set_normal(KeyboardCodes::KeyboardF8, false, 2);
+    keys[24].set_normal(KeyboardCodes::KeyboardOo, false, 0);
+    keys[24].set_normal(KeyboardCodes::KeyboardCloseBracketBrace, false, 1);
+    keys[24].set_normal(KeyboardCodes::KeyboardF8, false, 2);
+    keys[25].set_normal(KeyboardCodes::KeyboardPp, false, 0);
+    keys[25].set_normal(KeyboardCodes::KeyboardBackslashBar, false, 1);
+    keys[25].set_normal(KeyboardCodes::KeyboardF9, false, 2);
+    keys[26].set_normal(KeyboardCodes::KeyboardBackspace, false, 0);
+    keys[26].set_normal(KeyboardCodes::KeyboardBackspace, false, 1);
+    keys[26].set_normal(KeyboardCodes::KeyboardF10, false, 2);
+
+    // Middle Row
+    keys[27].set_normal(KeyboardCodes::KeyboardHh, false, 0);
+    keys[27].set_normal(KeyboardCodes::Keyboard6Caret, false, 1);
+    keys[27].set_normal(KeyboardCodes::KeyboardLeftArrow, false, 2);
+    keys[28].set_normal(KeyboardCodes::KeyboardJj, false, 0);
+    keys[28].set_normal(KeyboardCodes::Keyboard7Ampersand, false, 1);
+    keys[28].set_normal(KeyboardCodes::KeyboardDownArrow, false, 2);
+    keys[29].set_normal(KeyboardCodes::KeyboardKk, false, 0);
+    keys[29].set_normal(KeyboardCodes::Keyboard8Asterisk, false, 1);
+    keys[29].set_normal(KeyboardCodes::KeyboardUpArrow, false, 2);
+    keys[30].set_normal(KeyboardCodes::KeyboardLl, false, 0);
+    keys[30].set_normal(KeyboardCodes::Keyboard9OpenParens, false, 1);
+    keys[30].set_normal(KeyboardCodes::KeyboardRightArrow, false, 2);
+    keys[31].set_normal(KeyboardCodes::KeyboardSemiColon, false, 0);
+    keys[31].set_normal(KeyboardCodes::Keyboard0CloseParens, false, 1);
+    keys[32].set_normal(KeyboardCodes::KeyboardSingleDoubleQuote, false, 0);
+
+    // Bottom Row
+    keys[33].set_normal(KeyboardCodes::KeyboardNn, false, 0);
+    keys[34].set_normal(KeyboardCodes::KeyboardMm, false, 0);
+    keys[35].set_normal(KeyboardCodes::KeyboardCommaLess, false, 0);
+    keys[36].set_normal(KeyboardCodes::KeyboardPeriodGreater, false, 0);
+    keys[37].set_normal(KeyboardCodes::KeyboardSlashQuestion, false, 0);
+    keys[38].set_normal(KeyboardCodes::KeyboardRightAlt, false, 0);
+
+    // Thumb Row
+    keys[39].set_normal(KeyboardCodes::KeyboardEnter, false, 0);
+    keys[39].set_normal(KeyboardCodes::KeyboardEnter, false, 1);
+    keys[40].set_normal_all([KeyboardCodes::Layer2; NUM_LAYERS], false);
+    // keys[41].set_normal_all([KeyboardCodes::Layer2; NUM_LAYERS], false);
+    set_slave(&mut keys[21..42]);
 
     ws.write(brightness(once(colors::CYAN), 48)).unwrap();
     let mut report = Report::default();
 
     loop {
-        let mut external_layer = 0u8;
-        let mut external_modifier = 0u8;
+        let mut external_keys = [0u8; 3];
         critical_section::with(|_| unsafe {
-            external_layer = EXTERNAL_LAYER;
-            external_modifier = MOD_REPORT;
+            external_keys = SLAVE_KEY_STATES;
         });
         let mut pos = 0;
         // for i in 0..6 {
@@ -302,13 +329,21 @@ fn main() -> ! {
             }
             pos += 1;
         }
-        let hid_report =
-            report.generate_report(&mut keys, external_layer as usize, external_modifier);
+        let len = keys.len();
+        let e_keys = &mut keys[21..len];
+        for i in 0..21 {
+            let a_idx = (i / 8) as usize;
+            let b_idx = i % 8;
+            let val = (external_keys[a_idx] >> b_idx) & 1;
+            e_keys[i as usize].update_buf(val as u16);
+        }
+        let hid_report = report.generate_report(&mut keys);
+        let buf_rep = BufferReport::default();
         match hid_report {
-            Some((key_rep, buf_rep)) => {
+            Some(key_rep) => {
                 critical_section::with(|_| unsafe {
                     let _ = USB_HID.as_mut().map(|hid| hid.push_input(&key_rep));
-                    let _ = USB_HID2.as_mut().map(|hid| hid.push_input(&buf_rep));
+                    let _ = USB_HID2.as_mut().map(|hid| hid.push_input(&(buf_rep)));
                 });
             }
             None => {}
@@ -373,6 +408,12 @@ fn find_order(ary: &mut [u8]) {
     ary.copy_from_slice(&new_ary);
 }
 
+fn set_slave(keys: &mut [Key]) {
+    for key in keys {
+        key.set_slave();
+    }
+}
+
 /// This function is called whenever the USB Hardware generates an Interrupt
 /// Request.
 #[allow(non_snake_case)]
@@ -389,8 +430,9 @@ unsafe fn USBCTRL_IRQ() {
         let mut buf = [0u8; 64];
         USB_HID2.as_mut().unwrap().pull_raw_output(&mut buf).ok();
         if buf[0] == 5 {
-            MOD_REPORT = buf[1];
-            EXTERNAL_LAYER = buf[2];
+            SLAVE_KEY_STATES[0] = buf[1];
+            SLAVE_KEY_STATES[1] = buf[2];
+            SLAVE_KEY_STATES[2] = buf[3];
         }
     }
 }

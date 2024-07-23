@@ -5,7 +5,6 @@ use adafruit_kb2040 as bsp;
 use bsp::{
     entry,
     hal::{
-        self,
         adc::AdcPin,
         gpio::{
             bank0::{Gpio0, Gpio1, Gpio2},
@@ -13,30 +12,16 @@ use bsp::{
         },
         Adc, Timer,
     },
-    pac::{self, interrupt::USBCTRL_IRQ, RESETS},
+    pac,
 };
 use core::iter::once;
-use cortex_m::asm;
 use cortex_m::prelude::_embedded_hal_adc_OneShot;
 use defmt::*;
 use defmt_rtt as _;
-use embedded_hal::digital::{InputPin, OutputPin};
-use hal::{
-    gpio::{
-        DynFunction, DynPinId, DynSioConfig, FunctionSioInput, InOutPin, PinId, PinState, SioConfig,
-    },
-    pio::PIOExt,
-};
-use keyboard::{
-    hid::ModifierPosition,
-    keys::{Key, ScanCodeType},
-    report::Report,
-};
-use keyboard::{
-    hid::{BufferReport, KeyboardReportNKRO},
-    keys,
-};
+use embedded_hal::digital::OutputPin;
+use keyboard::{hid::SlaveKeyReport, keys::Key};
 use panic_probe as _;
+use rp2040_hal::{pio::PIOExt, usb::UsbBus};
 
 // Provide an alias for our BSP so we can switch targets quickly.
 // Uncomment the BSP you included in Cargo.toml, the rest of the code does not need to change.
@@ -50,16 +35,15 @@ use adafruit_kb2040::hal::{
 };
 
 use smart_leds::{brightness, colors};
-use smart_leds_trait::{SmartLedsWrite, RGB8};
+use smart_leds_trait::SmartLedsWrite;
 use usb_device::{
     class_prelude::{UsbBusAllocator, UsbClass},
     device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
 };
 use usbd_hid::{
-    descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor},
+    descriptor::SerializedDescriptor,
     hid_class::{
-        HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidProtocolMode, HidSubClass,
-        ProtocolModeConfig,
+        HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
     },
 };
 use ws2812_pio::Ws2812;
@@ -67,25 +51,13 @@ use ws2812_pio::Ws2812;
 const NUM_KEYS: u32 = 21;
 
 /// The USB Device Driver (shared with the interrupt).
-static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
+static mut USB_DEVICE: Option<UsbDevice<UsbBus>> = None;
 
 /// The USB Bus Driver (shared with the interrupt).
-static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
+static mut USB_BUS: Option<UsbBusAllocator<UsbBus>> = None;
 
 /// The USB Human Interface Device Driver (shared with the interrupt).
-static mut USB_HID: Option<HIDClass<hal::usb::UsbBus>> = None;
-
-static mut USB_HID2: Option<HIDClass<hal::usb::UsbBus>> = None;
-
-static mut REPORT: KeyboardReportNKRO = KeyboardReportNKRO::default();
-
-static mut BUFFER: BufferReport = BufferReport::default();
-
-static mut KEYS: [Key; 21] = [Key::default(); 21];
-
-static mut MOD_REPORT: u8 = 0u8;
-
-static mut EXTERNAL_LAYER: u8 = 0u8;
+static mut USB_HID: Option<HIDClass<UsbBus>> = None;
 
 #[entry]
 fn main() -> ! {
@@ -128,7 +100,7 @@ fn main() -> ! {
         timer.count_down(),
     );
 
-    let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
+    let usb_bus = UsbBusAllocator::new(UsbBus::new(
         pac.USBCTRL_REGS,
         pac.USBCTRL_DPRAM,
         clocks.usb_clock,
@@ -146,15 +118,9 @@ fn main() -> ! {
     usb_settings.config = ProtocolModeConfig::ForceReport;
     usb_settings.locale = HidCountryCode::US;
 
-    let usb_hid = HIDClass::new_with_settings(bus_ref, KeyboardReportNKRO::desc(), 1, usb_settings);
+    let usb_hid = HIDClass::new_with_settings(bus_ref, SlaveKeyReport::desc(), 1, usb_settings);
     unsafe {
         USB_HID = Some(usb_hid);
-    }
-
-    let usb_hid2 = HIDClass::new(bus_ref, BufferReport::desc(), 1);
-
-    unsafe {
-        USB_HID2 = Some(usb_hid2);
     }
 
     let usb_dev = UsbDeviceBuilder::new(bus_ref, UsbVidPid(0x0727, 0x0727))
@@ -174,7 +140,7 @@ fn main() -> ! {
 
     unsafe {
         // Enable the USB interrupt
-        pac::NVIC::unmask(hal::pac::Interrupt::USBCTRL_IRQ);
+        pac::NVIC::unmask(pac::Interrupt::USBCTRL_IRQ);
     };
 
     let mut sel0 = pins.tx.into_push_pull_output();
@@ -195,84 +161,12 @@ fn main() -> ! {
     ];
     find_order(&mut order);
 
-    let mut keys = [Key::new(
-        [0x00; keys::NUM_LAYERS],
-        [ScanCodeType::Letter; keys::NUM_LAYERS],
-        1400.0,
-        2000.0,
-    ); 21];
-
-    // Initialize Keys
-    // Rows go from top to bottom
-    // First Row left to right
-    keys[0].bit_pos[0] = KeyboardUsage::KeyboardYy as u8;
-    keys[0].bit_pos[1] = KeyboardUsage::KeyboardDashUnderscore as u8;
-    keys[1].bit_pos[0] = KeyboardUsage::KeyboardUu as u8;
-    keys[1].bit_pos[1] = KeyboardUsage::KeyboardEqualPlus as u8;
-    keys[2].bit_pos[0] = KeyboardUsage::KeyboardIi as u8;
-    keys[2].bit_pos[1] = KeyboardUsage::KeyboardOpenBracketBrace as u8;
-    keys[3].bit_pos[0] = KeyboardUsage::KeyboardOo as u8;
-    keys[3].bit_pos[1] = KeyboardUsage::KeyboardCloseBracketBrace as u8;
-    keys[4].bit_pos[0] = KeyboardUsage::KeyboardPp as u8;
-    keys[4].bit_pos[1] = KeyboardUsage::KeyboardBackslashBar as u8;
-    keys[5].bit_pos[0] = KeyboardUsage::KeyboardBackspace as u8;
-    keys[5].bit_pos[1] = KeyboardUsage::KeyboardBackspace as u8;
-
-    // Middle Row
-    keys[6].bit_pos[0] = KeyboardUsage::KeyboardHh as u8;
-    keys[6].bit_pos[1] = KeyboardUsage::Keyboard6Caret as u8;
-    keys[6].bit_pos[2] = KeyboardUsage::KeyboardLeftArrow as u8;
-    keys[7].bit_pos[0] = KeyboardUsage::KeyboardJj as u8;
-    keys[7].bit_pos[1] = KeyboardUsage::Keyboard7Ampersand as u8;
-    keys[7].bit_pos[2] = KeyboardUsage::KeyboardDownArrow as u8;
-    keys[8].bit_pos[0] = KeyboardUsage::KeyboardKk as u8;
-    keys[8].bit_pos[1] = KeyboardUsage::Keyboard8Asterisk as u8;
-    keys[8].bit_pos[2] = KeyboardUsage::KeyboardUpArrow as u8;
-    keys[9].bit_pos[0] = KeyboardUsage::KeyboardLl as u8;
-    keys[9].bit_pos[1] = KeyboardUsage::Keyboard9OpenParens as u8;
-    keys[9].bit_pos[2] = KeyboardUsage::KeyboardRightArrow as u8;
-    keys[10].bit_pos[0] = KeyboardUsage::KeyboardSemiColon as u8;
-    keys[10].bit_pos[1] = KeyboardUsage::Keyboard0CloseParens as u8;
-    keys[11].bit_pos[0] = KeyboardUsage::KeyboardSingleDoubleQuote as u8;
-
-    // Bottom Row
-    keys[12].bit_pos[0] = KeyboardUsage::KeyboardNn as u8;
-    keys[13].bit_pos[0] = KeyboardUsage::KeyboardMm as u8;
-    keys[14].bit_pos[0] = KeyboardUsage::KeyboardCommaLess as u8;
-    keys[15].bit_pos[0] = KeyboardUsage::KeyboardPeriodGreater as u8;
-    keys[16].bit_pos[0] = KeyboardUsage::KeyboardSlashQuestion as u8;
-    keys[17].scan_code_type[0] = ScanCodeType::Modifier;
-    keys[17].scan_code_type[1] = ScanCodeType::Modifier;
-    keys[17].scan_code_type[2] = ScanCodeType::Modifier;
-    keys[17].bit_pos[0] = ModifierPosition::LeftCtrl as u8;
-    keys[17].bit_pos[1] = ModifierPosition::LeftCtrl as u8;
-
-    // Thumb Row
-    keys[18].bit_pos[0] = KeyboardUsage::KeyboardEnter as u8;
-    keys[18].bit_pos[1] = KeyboardUsage::KeyboardEnter as u8;
-    keys[19].scan_code_type[0] = ScanCodeType::Layer;
-    keys[19].scan_code_type[1] = ScanCodeType::Layer;
-    keys[19].scan_code_type[2] = ScanCodeType::Layer;
-    keys[19].bit_pos[0] = 2;
-    keys[19].bit_pos[1] = 2;
-    keys[19].bit_pos[2] = 2;
-    keys[20].scan_code_type[0] = ScanCodeType::Modifier;
-    keys[20].scan_code_type[1] = ScanCodeType::Modifier;
-    keys[20].scan_code_type[2] = ScanCodeType::Modifier;
-    keys[20].bit_pos[0] = ModifierPosition::LeftAlt as u8;
-    keys[20].bit_pos[1] = ModifierPosition::LeftAlt as u8;
+    let mut keys = [Key::default(); 21];
 
     ws.write(brightness(once(colors::CYAN), 48)).unwrap();
-    let mut report = Report::default();
+    let mut report = SlaveKeyReport::default();
 
     loop {
-        let mut external_layer = 0u8;
-        let mut external_modifier = 0u8;
-        critical_section::with(|_| unsafe {
-            external_layer = EXTERNAL_LAYER;
-            external_modifier = MOD_REPORT;
-        });
-        let mut pos = 0;
         // for i in 0..6 {
         //     change_sel(&mut sel0, &mut sel1, &mut sel2, i);
         //     delay.delay_us(10);
@@ -285,6 +179,7 @@ fn main() -> ! {
         //         keys[20].update_buf(adc.read(&mut a0).unwrap_or(69));
         //     }
         // }
+        let mut pos = 0;
         for i in order {
             let chan = pos % 4;
             if chan == 0 {
@@ -300,13 +195,11 @@ fn main() -> ! {
             }
             pos += 1;
         }
-        let hid_report =
-            report.generate_report(&mut keys, external_layer as usize, external_modifier);
+        let hid_report = report.generate_report(&mut keys);
         match hid_report {
-            Some((key_rep, buf_rep)) => {
+            Some(key_rep) => {
                 critical_section::with(|_| unsafe {
                     let _ = USB_HID.as_mut().map(|hid| hid.push_input(&key_rep));
-                    let _ = USB_HID2.as_mut().map(|hid| hid.push_input(&buf_rep));
                 });
             }
             None => {}
@@ -379,17 +272,10 @@ unsafe fn USBCTRL_IRQ() {
     if USB_DEVICE
         .as_mut()
         .unwrap()
-        .poll(&mut [USB_HID.as_mut().unwrap(), USB_HID2.as_mut().unwrap()])
+        .poll(&mut [USB_HID.as_mut().unwrap()])
     {
         USB_HID.as_mut().unwrap().poll();
-        USB_HID2.as_mut().unwrap().poll();
         USB_HID.as_mut().unwrap().pull_raw_output(&mut [0; 64]).ok();
-        let mut buf = [0u8; 64];
-        USB_HID2.as_mut().unwrap().pull_raw_output(&mut buf).ok();
-        if buf[0] == 5 {
-            MOD_REPORT = buf[1];
-            EXTERNAL_LAYER = buf[2];
-        }
     }
 }
 

@@ -4,7 +4,7 @@ use usbd_hid::descriptor::{
     AsInputReport,
 };
 
-use crate::keys::ScanCodeType;
+use crate::keys::{Key, ScanResult};
 
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = KEYBOARD) = {
@@ -35,17 +35,6 @@ impl KeyboardReportNKRO {
     }
 }
 
-pub enum ModifierPosition {
-    LeftCtrl = 0,
-    LeftShift = 1,
-    LeftAlt = 2,
-    LeftGui = 3,
-    RightCtrl = 4,
-    RightShift = 5,
-    RightAlt = 6,
-    RightGui = 7,
-}
-
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = VENDOR_DEFINED_START, usage = 0x01) = {
         key_report0=input;
@@ -73,6 +62,55 @@ impl BufferReport {
             inner_modifier: 0u8,
             layer_key: 0u8,
             output_buffer: [0u8; 32],
+        }
+    }
+}
+
+#[gen_hid_descriptor(
+    (collection = APPLICATION, usage_page = VENDOR_DEFINED_START, usage = 0x01) = {
+        key_states=input;
+    }
+)]
+pub struct SlaveKeyReport {
+    pub key_states: [u8; 3],
+}
+
+impl SlaveKeyReport {
+    pub const fn default() -> Self {
+        Self {
+            key_states: [0u8; 3],
+        }
+    }
+
+    pub fn generate_report(&mut self, keys: &mut [Key]) -> Option<SlaveKeyReport> {
+        let mut changed = false;
+        for i in 0..keys.len() {
+            match keys[i].is_pressed(0) {
+                ScanResult::Pressed(_) => {
+                    let a_idx = (i / 8) as usize;
+                    let b_idx = i % 8;
+                    let res = self.key_states[a_idx] | (1 << b_idx);
+                    if self.key_states[a_idx] != res {
+                        self.key_states[a_idx] = res;
+                        changed = true;
+                    }
+                }
+                ScanResult::Released(_) => {
+                    let a_idx = (i / 8) as usize;
+                    let b_idx = i % 8;
+                    let res = self.key_states[a_idx] & !(1 << b_idx);
+                    if self.key_states[a_idx] != res {
+                        self.key_states[a_idx] = res;
+                        changed = true;
+                    }
+                }
+                ScanResult::Holding => {}
+            }
+        }
+        if changed {
+            Some(*self)
+        } else {
+            None
         }
     }
 }

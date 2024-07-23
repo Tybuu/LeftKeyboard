@@ -19,6 +19,7 @@ ws2812-pio = "0.8.0"
 smart-leds-trait = "*"
 smart-leds = "*"
 fugit = "*"
+heapless = "*"
 
 # We're using a Pico by default on this template
 # rp-pico = "0.9"
