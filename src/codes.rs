@@ -460,12 +460,12 @@ pub enum KeyboardCodes {
     Layer2 = 0xEB,
     Layer3 = 0xEC,
     Layer4 = 0xED,
-    Layer5 = 0xEF,
-    Layer6 = 0xF0,
-    Layer7 = 0xF1,
-    Layer8 = 0xF2,
-    Layer9 = 0xF3,
-    Layer10 = 0xF4,
+    Layer5 = 0xEE,
+    Layer6 = 0xEF,
+    Layer7 = 0xF0,
+    Layer8 = 0xF1,
+    Layer9 = 0xF2,
+    Layer10 = 0xF3,
 }
 
 impl KeyboardCodes {
@@ -477,4 +477,3 @@ impl KeyboardCodes {
         }
     }
 }
-

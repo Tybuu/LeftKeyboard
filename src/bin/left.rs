@@ -21,15 +21,10 @@ use cortex_m::prelude::_embedded_hal_adc_OneShot;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::{InputPin, OutputPin};
-use hal::{
-    gpio::{
-        DynFunction, DynPinId, DynSioConfig, FunctionSioInput, InOutPin, PinId, PinState, SioConfig,
-    },
-    pio::PIOExt,
-};
+use hal::pio::PIOExt;
 use keyboard::{
     codes::KeyboardCodes,
-    keys::{Key, NUM_LAYERS},
+    keys::{intialize_timer, Key, NUM_LAYERS},
     report::Report,
 };
 use keyboard::{
@@ -102,6 +97,7 @@ fn main() -> ! {
 
     let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
     let timer = Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    intialize_timer(timer);
 
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
@@ -191,92 +187,143 @@ fn main() -> ! {
     // Initialize Keys for Left Keys
     // Rows go from top to bottom
     // First Row left to right
-    // keys[0].set_normal(KeyboardCodes::KeyboardEscape, false, 0);
-    keys[0].set_normal(KeyboardCodes::KeyboardTab, false, 0);
+    // keys[0].set_normal(KeyboardCodes::KeyboardTab, false, 0);
     keys[1].set_normal(KeyboardCodes::KeyboardQq, false, 0);
-    keys[1].set_normal(KeyboardCodes::KeyboardBacktickTilde, false, 1);
-    keys[1].set_normal(KeyboardCodes::KeyboardF1, false, 2);
+    keys[1].set_normal(KeyboardCodes::KeyboardOpenBracketBrace, false, 1);
     keys[2].set_normal(KeyboardCodes::KeyboardWw, false, 0);
-    keys[2].set_normal(KeyboardCodes::KeyboardF2, false, 2);
+    keys[2].set_normal(KeyboardCodes::Keyboard7Ampersand, false, 1);
     keys[3].set_normal(KeyboardCodes::KeyboardEe, false, 0);
-    keys[3].set_normal(KeyboardCodes::KeyboardF3, false, 2);
-
+    keys[3].set_normal(KeyboardCodes::Keyboard8Asterisk, false, 1);
     keys[4].set_normal(KeyboardCodes::KeyboardRr, false, 0);
-    keys[4].set_normal(KeyboardCodes::KeyboardF4, false, 2);
+    keys[4].set_normal(KeyboardCodes::Keyboard9OpenParens, false, 1);
     keys[5].set_normal(KeyboardCodes::KeyboardTt, false, 0);
-    keys[5].set_normal(KeyboardCodes::KeyboardF5, false, 2);
+    keys[5].set_normal(KeyboardCodes::KeyboardCloseBracketBrace, false, 1);
 
     // Middle Row
-    // keys[6].set_normal_all([KeyboardCodes::KeyboardLeftControl; NUM_LAYERS], false);
-    keys[6].set_hold(
-        KeyboardCodes::KeyboardEscape,
+    // keys[6].set_hold(
+    //     KeyboardCodes::KeyboardEscape,
+    //     KeyboardCodes::KeyboardLeftControl,
+    //     false,
+    //     false,
+    //     0,
+    // );
+    keys[7].set_hold(
+        KeyboardCodes::KeyboardAa,
+        KeyboardCodes::KeyboardLeftGUI,
+        false,
+        false,
+        0,
+    );
+    keys[7].set_normal(KeyboardCodes::KeyboardSingleDoubleQuote, false, 1);
+    keys[8].set_hold(
+        KeyboardCodes::KeyboardSs,
+        KeyboardCodes::KeyboardLeftAlt,
+        false,
+        false,
+        0,
+    );
+    keys[8].set_normal(KeyboardCodes::Keyboard4Dollar, false, 1);
+    keys[9].set_hold(
+        KeyboardCodes::KeyboardDd,
         KeyboardCodes::KeyboardLeftControl,
         false,
         false,
         0,
     );
-    keys[7].set_normal(KeyboardCodes::KeyboardAa, false, 0);
-    keys[7].set_normal(KeyboardCodes::Keyboard1Exclamation, false, 1);
-    keys[8].set_normal(KeyboardCodes::KeyboardSs, false, 0);
-    keys[8].set_normal(KeyboardCodes::Keyboard2At, false, 1);
-    keys[9].set_normal(KeyboardCodes::KeyboardDd, false, 0);
-    keys[9].set_normal(KeyboardCodes::Keyboard3Hash, false, 1);
-    keys[10].set_normal(KeyboardCodes::KeyboardFf, false, 0);
-    keys[10].set_normal(KeyboardCodes::Keyboard4Dollar, false, 1);
+    keys[9].set_normal(KeyboardCodes::Keyboard5Percent, false, 1);
+    keys[9].set_tapping_term(100, 0);
+    keys[9].roll = true;
+    keys[10].set_hold(
+        KeyboardCodes::KeyboardFf,
+        KeyboardCodes::KeyboardLeftShift,
+        false,
+        false,
+        0,
+    );
+    keys[10].set_tapping_term(100, 0);
+    keys[10].roll = true;
+    keys[10].set_normal(KeyboardCodes::Keyboard6Caret, false, 1);
     keys[11].set_normal(KeyboardCodes::KeyboardGg, false, 0);
-    keys[11].set_normal(KeyboardCodes::Keyboard5Percent, false, 1);
+    keys[11].set_normal(KeyboardCodes::KeyboardEqualPlus, false, 1);
 
     // Bottom Row
-    keys[12].set_normal_all([KeyboardCodes::KeyboardLeftShift; NUM_LAYERS], false);
+    // keys[12].set_normal_all([KeyboardCodes::KeyboardLeftShift; NUM_LAYERS], false);
     keys[13].set_normal(KeyboardCodes::KeyboardZz, false, 0);
+    keys[13].set_normal(KeyboardCodes::KeyboardBacktickTilde, false, 1);
     keys[14].set_normal(KeyboardCodes::KeyboardXx, false, 0);
+    keys[14].set_normal(KeyboardCodes::Keyboard1Exclamation, false, 1);
     keys[15].set_normal(KeyboardCodes::KeyboardCc, false, 0);
+    keys[15].set_normal(KeyboardCodes::Keyboard2At, false, 1);
     keys[16].set_normal(KeyboardCodes::KeyboardVv, false, 0);
+    keys[16].set_normal(KeyboardCodes::Keyboard3Hash, false, 1);
     keys[17].set_normal(KeyboardCodes::KeyboardBb, false, 0);
+    keys[17].set_normal(KeyboardCodes::KeyboardBackslashBar, false, 1);
 
     // Thumb Row
-    keys[18].set_normal_all([KeyboardCodes::KeyboardLeftGUI; NUM_LAYERS], false);
-    keys[19].set_normal_all([KeyboardCodes::Layer1; NUM_LAYERS], false);
-    keys[20].set_normal_all([KeyboardCodes::KeyboardSpacebar; NUM_LAYERS], false);
+    keys[18].set_normal(KeyboardCodes::KeyboardEscape, false, 0);
+    keys[19].set_hold(
+        KeyboardCodes::KeyboardTab,
+        KeyboardCodes::Layer2,
+        false,
+        false,
+        0,
+    );
+    keys[19].set_tapping_term(100, 0);
+    keys[19].set_normal(KeyboardCodes::Keyboard0CloseParens, false, 1);
+    keys[20].set_normal(KeyboardCodes::KeyboardSpacebar, false, 0);
+    keys[20].set_normal(KeyboardCodes::KeyboardDashUnderscore, false, 1);
 
     // Right Keyboard
     // Top Row
     //
     keys[21].set_normal(KeyboardCodes::KeyboardYy, false, 0);
-    keys[21].set_normal(KeyboardCodes::KeyboardDashUnderscore, false, 1);
-    keys[21].set_normal(KeyboardCodes::KeyboardF6, false, 2);
     keys[22].set_normal(KeyboardCodes::KeyboardUu, false, 0);
-    keys[22].set_normal(KeyboardCodes::KeyboardEqualPlus, false, 1);
-    keys[22].set_normal(KeyboardCodes::KeyboardF7, false, 2);
     keys[23].set_normal(KeyboardCodes::KeyboardIi, false, 0);
-    keys[23].set_normal(KeyboardCodes::KeyboardOpenBracketBrace, false, 1);
-    keys[23].set_normal(KeyboardCodes::KeyboardF8, false, 2);
     keys[24].set_normal(KeyboardCodes::KeyboardOo, false, 0);
-    keys[24].set_normal(KeyboardCodes::KeyboardCloseBracketBrace, false, 1);
-    keys[24].set_normal(KeyboardCodes::KeyboardF8, false, 2);
     keys[25].set_normal(KeyboardCodes::KeyboardPp, false, 0);
-    keys[25].set_normal(KeyboardCodes::KeyboardBackslashBar, false, 1);
-    keys[25].set_normal(KeyboardCodes::KeyboardF9, false, 2);
-    keys[26].set_normal(KeyboardCodes::KeyboardBackspace, false, 0);
-    keys[26].set_normal(KeyboardCodes::KeyboardBackspace, false, 1);
-    keys[26].set_normal(KeyboardCodes::KeyboardF10, false, 2);
+    // keys[26].set_normal(KeyboardCodes::KeyboardBackspace, false, 0);
+    // keys[26].set_normal(KeyboardCodes::KeyboardBackspace, false, 1);
+    // keys[26].set_normal(KeyboardCodes::KeyboardF10, false, 2);
 
     // Middle Row
     keys[27].set_normal(KeyboardCodes::KeyboardHh, false, 0);
-    keys[27].set_normal(KeyboardCodes::Keyboard6Caret, false, 1);
     keys[27].set_normal(KeyboardCodes::KeyboardLeftArrow, false, 2);
-    keys[28].set_normal(KeyboardCodes::KeyboardJj, false, 0);
-    keys[28].set_normal(KeyboardCodes::Keyboard7Ampersand, false, 1);
+    keys[28].set_hold(
+        KeyboardCodes::KeyboardJj,
+        KeyboardCodes::KeyboardRightShift,
+        false,
+        false,
+        0,
+    );
+    keys[28].roll = true;
     keys[28].set_normal(KeyboardCodes::KeyboardDownArrow, false, 2);
-    keys[29].set_normal(KeyboardCodes::KeyboardKk, false, 0);
-    keys[29].set_normal(KeyboardCodes::Keyboard8Asterisk, false, 1);
+    keys[28].set_tapping_term(100, 0);
+    keys[29].set_hold(
+        KeyboardCodes::KeyboardKk,
+        KeyboardCodes::KeyboardRightControl,
+        false,
+        false,
+        0,
+    );
     keys[29].set_normal(KeyboardCodes::KeyboardUpArrow, false, 2);
-    keys[30].set_normal(KeyboardCodes::KeyboardLl, false, 0);
-    keys[30].set_normal(KeyboardCodes::Keyboard9OpenParens, false, 1);
+    keys[29].set_tapping_term(100, 0);
+    keys[29].roll = true;
+    keys[30].set_hold(
+        KeyboardCodes::KeyboardLl,
+        KeyboardCodes::KeyboardRightAlt,
+        false,
+        false,
+        0,
+    );
     keys[30].set_normal(KeyboardCodes::KeyboardRightArrow, false, 2);
-    keys[31].set_normal(KeyboardCodes::KeyboardSemiColon, false, 0);
-    keys[31].set_normal(KeyboardCodes::Keyboard0CloseParens, false, 1);
-    keys[32].set_normal(KeyboardCodes::KeyboardSingleDoubleQuote, false, 0);
+    keys[31].set_hold(
+        KeyboardCodes::KeyboardSemiColon,
+        KeyboardCodes::KeyboardRightGUI,
+        false,
+        false,
+        0,
+    );
+    // keys[32].set_normal(KeyboardCodes::KeyboardSingleDoubleQuote, false, 0);
 
     // Bottom Row
     keys[33].set_normal(KeyboardCodes::KeyboardNn, false, 0);
@@ -284,12 +331,120 @@ fn main() -> ! {
     keys[35].set_normal(KeyboardCodes::KeyboardCommaLess, false, 0);
     keys[36].set_normal(KeyboardCodes::KeyboardPeriodGreater, false, 0);
     keys[37].set_normal(KeyboardCodes::KeyboardSlashQuestion, false, 0);
-    keys[38].set_normal(KeyboardCodes::KeyboardRightAlt, false, 0);
+    // keys[38].set_normal(KeyboardCodes::KeyboardRightAlt, false, 0);
+    keys[38].set_normal(KeyboardCodes::Layer3, true, 0);
 
     // Thumb Row
     keys[39].set_normal(KeyboardCodes::KeyboardEnter, false, 0);
     keys[39].set_normal(KeyboardCodes::KeyboardEnter, false, 1);
-    keys[40].set_normal_all([KeyboardCodes::Layer2; NUM_LAYERS], false);
+    keys[40].set_hold(
+        KeyboardCodes::KeyboardBackspace,
+        KeyboardCodes::Layer1,
+        false,
+        false,
+        0,
+    );
+    keys[40].set_tapping_term(100, 0);
+
+    // keys[41].set_normal_all([KeyboardCodes::Layer2; NUM_LAYERS], false);
+    //
+    //------------------------------------------------------------
+    keys[0].set_normal(KeyboardCodes::KeyboardEscape, false, 3);
+    keys[0].set_normal(KeyboardCodes::KeyboardTab, false, 4);
+    keys[1].set_normal(KeyboardCodes::KeyboardQq, false, 3);
+    keys[1].set_normal(KeyboardCodes::KeyboardBacktickTilde, false, 4);
+    keys[1].set_normal(KeyboardCodes::KeyboardF1, false, 5);
+    keys[2].set_normal(KeyboardCodes::KeyboardWw, false, 3);
+    keys[2].set_normal(KeyboardCodes::KeyboardF2, false, 5);
+    keys[3].set_normal(KeyboardCodes::KeyboardEe, false, 3);
+    keys[3].set_normal(KeyboardCodes::KeyboardF3, false, 5);
+
+    keys[4].set_normal(KeyboardCodes::KeyboardRr, false, 3);
+    keys[4].set_normal(KeyboardCodes::KeyboardF4, false, 5);
+    keys[5].set_normal(KeyboardCodes::KeyboardTt, false, 3);
+    keys[5].set_normal(KeyboardCodes::KeyboardF5, false, 5);
+
+    // Middle Row
+    keys[6].set_normal(KeyboardCodes::KeyboardLeftControl, false, 3);
+    keys[6].set_normal(KeyboardCodes::KeyboardLeftControl, false, 4);
+    keys[7].set_normal(KeyboardCodes::KeyboardAa, false, 3);
+    keys[7].set_normal(KeyboardCodes::Keyboard1Exclamation, false, 4);
+    keys[8].set_normal(KeyboardCodes::KeyboardSs, false, 3);
+    keys[8].set_normal(KeyboardCodes::Keyboard2At, false, 4);
+    keys[9].set_normal(KeyboardCodes::KeyboardDd, false, 3);
+    keys[9].set_normal(KeyboardCodes::Keyboard3Hash, false, 4);
+    keys[10].set_normal(KeyboardCodes::KeyboardFf, false, 3);
+    keys[10].set_normal(KeyboardCodes::Keyboard4Dollar, false, 4);
+    keys[11].set_normal(KeyboardCodes::KeyboardGg, false, 3);
+    keys[11].set_normal(KeyboardCodes::Keyboard5Percent, false, 4);
+
+    // Bottom Row
+    keys[12].set_normal(KeyboardCodes::KeyboardLeftShift, false, 3);
+    keys[12].set_normal(KeyboardCodes::KeyboardLeftShift, false, 4);
+    keys[13].set_normal(KeyboardCodes::KeyboardZz, false, 3);
+    keys[14].set_normal(KeyboardCodes::KeyboardXx, false, 3);
+    keys[15].set_normal(KeyboardCodes::KeyboardCc, false, 3);
+    keys[16].set_normal(KeyboardCodes::KeyboardVv, false, 3);
+    keys[17].set_normal(KeyboardCodes::KeyboardBb, false, 3);
+
+    // Thumb Row
+    keys[18].set_normal(KeyboardCodes::KeyboardLeftGUI, false, 3);
+    keys[19].set_normal(KeyboardCodes::Layer4, false, 3);
+    keys[20].set_normal(KeyboardCodes::KeyboardSpacebar, false, 3);
+
+    // Right Keyboard
+    // Top Row
+    //
+    keys[21].set_normal(KeyboardCodes::KeyboardYy, false, 3);
+    keys[21].set_normal(KeyboardCodes::KeyboardDashUnderscore, false, 4);
+    keys[21].set_normal(KeyboardCodes::KeyboardF6, false, 5);
+    keys[22].set_normal(KeyboardCodes::KeyboardUu, false, 3);
+    keys[22].set_normal(KeyboardCodes::KeyboardEqualPlus, false, 4);
+    keys[22].set_normal(KeyboardCodes::KeyboardF7, false, 5);
+    keys[23].set_normal(KeyboardCodes::KeyboardIi, false, 3);
+    keys[23].set_normal(KeyboardCodes::KeyboardOpenBracketBrace, false, 4);
+    keys[23].set_normal(KeyboardCodes::KeyboardF8, false, 5);
+    keys[24].set_normal(KeyboardCodes::KeyboardOo, false, 3);
+    keys[24].set_normal(KeyboardCodes::KeyboardCloseBracketBrace, false, 4);
+    keys[24].set_normal(KeyboardCodes::KeyboardF8, false, 5);
+    keys[25].set_normal(KeyboardCodes::KeyboardPp, false, 3);
+    keys[25].set_normal(KeyboardCodes::KeyboardBackslashBar, false, 4);
+    keys[25].set_normal(KeyboardCodes::KeyboardF9, false, 5);
+    keys[26].set_normal(KeyboardCodes::KeyboardBackspace, false, 3);
+    keys[26].set_normal(KeyboardCodes::KeyboardBackspace, false, 4);
+    keys[26].set_normal(KeyboardCodes::KeyboardF10, false, 5);
+
+    // Middle Row
+    keys[27].set_normal(KeyboardCodes::KeyboardHh, false, 3);
+    keys[27].set_normal(KeyboardCodes::Keyboard6Caret, false, 4);
+    keys[27].set_normal(KeyboardCodes::KeyboardLeftArrow, false, 5);
+    keys[28].set_normal(KeyboardCodes::KeyboardJj, false, 3);
+    keys[28].set_normal(KeyboardCodes::Keyboard7Ampersand, false, 4);
+    keys[28].set_normal(KeyboardCodes::KeyboardDownArrow, false, 5);
+    keys[29].set_normal(KeyboardCodes::KeyboardKk, false, 3);
+    keys[29].set_normal(KeyboardCodes::Keyboard8Asterisk, false, 4);
+    keys[29].set_normal(KeyboardCodes::KeyboardUpArrow, false, 5);
+    keys[30].set_normal(KeyboardCodes::KeyboardLl, false, 3);
+    keys[30].set_normal(KeyboardCodes::Keyboard9OpenParens, false, 4);
+    keys[30].set_normal(KeyboardCodes::KeyboardRightArrow, false, 5);
+    keys[31].set_normal(KeyboardCodes::KeyboardSemiColon, false, 3);
+    keys[31].set_normal(KeyboardCodes::Keyboard0CloseParens, false, 4);
+    keys[32].set_normal(KeyboardCodes::KeyboardSingleDoubleQuote, false, 3);
+
+    // Bottom Row
+    keys[33].set_normal(KeyboardCodes::KeyboardNn, false, 3);
+    keys[34].set_normal(KeyboardCodes::KeyboardMm, false, 3);
+    keys[35].set_normal(KeyboardCodes::KeyboardCommaLess, false, 3);
+    keys[36].set_normal(KeyboardCodes::KeyboardPeriodGreater, false, 3);
+    keys[37].set_normal(KeyboardCodes::KeyboardSlashQuestion, false, 3);
+    keys[38].set_normal(KeyboardCodes::KeyboardRightAlt, false, 3);
+    keys[38].set_normal(KeyboardCodes::Layer0, true, 3);
+    keys[38].set_normal(KeyboardCodes::Layer0, true, 5);
+
+    // Thumb Row
+    keys[39].set_normal(KeyboardCodes::KeyboardEnter, false, 3);
+    keys[39].set_normal(KeyboardCodes::KeyboardEnter, false, 4);
+    keys[40].set_normal(KeyboardCodes::Layer5, false, 3);
     // keys[41].set_normal_all([KeyboardCodes::Layer2; NUM_LAYERS], false);
     set_slave(&mut keys[21..42]);
 

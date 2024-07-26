@@ -1,7 +1,8 @@
 use crate::{
     hid::KeyboardReportNKRO,
-    keys::{Key, KeyType, ScanResult},
+    keys::{Key, KeyType, ScanResult, TapType},
 };
+
 fn set_bit(num: u8, bit: u8, pos: u8) -> u8 {
     let mask = 1 << pos;
     if bit == 1 {
@@ -30,10 +31,27 @@ impl Report {
         let mut new_layer: i8 = -1;
         let mut reset = false; // if true, change the reset layer
         let mut changed = false;
-
+        let mut key_pressed = false;
+        for key in &mut *keys {
+            match key.is_pressed(self.current_layer) {
+                ScanResult::Pressed(code) => match code.key_type {
+                    KeyType::Letter => {
+                        key_pressed = true;
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        for key in &mut *keys {
+            if key.roll {
+                key.set_other(key_pressed);
+            }
+        }
         // If multiple layer keys are pressed, the higest value will get priority
         for key in &mut *keys {
             let mut current_layer = self.current_layer;
+
             if key.current_layer != -1 {
                 current_layer = key.current_layer as usize;
             }
@@ -58,7 +76,7 @@ impl Report {
                 self.reset_layer = new_layer as usize;
             }
         }
-        for key in keys {
+        for key in &mut *keys {
             let mut current_layer = self.current_layer;
             if key.current_layer != -1 {
                 current_layer = key.current_layer as usize;
@@ -110,7 +128,11 @@ impl Report {
                         key.current_layer = -1;
                     }
                 },
-                ScanResult::Holding => {}
+                ScanResult::Holding => {
+                    if key.current_layer == -1 {
+                        key.current_layer = self.current_layer as i8;
+                    }
+                }
             }
         }
         if changed {

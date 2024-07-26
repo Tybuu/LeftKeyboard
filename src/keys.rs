@@ -2,14 +2,20 @@ use rp2040_hal::Timer;
 
 use crate::codes::KeyboardCodes;
 
-const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.65;
-const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.60;
+const MINIMUM_DISTANCE_SCALE_UP: f32 = 0.80;
+const MINIMUM_DISTANCE_SCALE_DOWN: f32 = 0.75;
 const BUFFER_SIZE: u16 = 2;
 const TOLERANCE_SCALE: f32 = 0.075;
 
-const HOLD_TIME: u16 = 200 * (1000 / 250);
-pub const NUM_LAYERS: usize = 3;
+const HOLD_TIME: u64 = 300 * 1000;
+const PRESS_TIME: u64 = 2000;
+pub const NUM_LAYERS: usize = 10;
 
+static mut TIMER: Option<Timer> = None;
+
+pub fn intialize_timer(timer: Timer) {
+    unsafe { TIMER = Some(timer) }
+}
 #[derive(Copy, Clone)]
 struct DigitalPosition {
     buffer: [u32; BUFFER_SIZE as usize],
@@ -209,17 +215,21 @@ impl ScanCode {
 }
 
 #[derive(Copy, Clone)]
-enum TapType {
+pub enum TapType {
     Normal,
     Hold, // Hold keys will have two scan codes, one for the tap and the other for hold
 }
 
 #[derive(Copy, Clone)]
-struct KeyInfo {
-    tap_type: TapType,
+pub struct KeyInfo {
+    pub tap_type: TapType,
     tap_code: ScanCode,
     hold_code: ScanCode,
-    time: u16,
+    time: u64,
+    min_hold_time: u64,
+    tap_time: u64,
+    was_held: bool,
+    release: TapType,
 }
 
 impl KeyInfo {
@@ -229,6 +239,10 @@ impl KeyInfo {
             tap_code: ScanCode::default(),
             hold_code: ScanCode::default(),
             time: 0,
+            min_hold_time: HOLD_TIME,
+            tap_time: 0,
+            was_held: false,
+            release: TapType::Normal,
         }
     }
 }
@@ -244,23 +258,27 @@ pub struct Key {
     pos: Position,
     key_info: [KeyInfo; NUM_LAYERS],
     pub current_layer: i8,
-    was_held: bool, // tells us if key was held so we know what scan code to release
+    start: bool,
+    pub roll: bool,
+    other_side: bool,
 }
 
 impl Key {
     pub fn default() -> Self {
         Self {
-            pos: Position::Digital(DigitalPosition::new(1400.0, 2000.0)),
+            pos: Position::Wooting(WootingPosition::new(1400.0, 2000.0)),
             key_info: [KeyInfo::default(); NUM_LAYERS],
             current_layer: -1,
-            was_held: false,
+            start: false,
+            roll: false,
+            other_side: false,
         }
     }
 
     pub fn set_normal(&mut self, code: KeyboardCodes, toggle: bool, layer: usize) {
-        self.key_info[layer].tap_type = TapType::Normal;
         match code.get_code_type() {
             KeyType::Layer => {
+                self.key_info[layer].tap_type = TapType::Normal;
                 self.key_info[layer].tap_code = ScanCode {
                     key_type: KeyType::Layer,
                     pos: (code as u8 - KeyboardCodes::Layer0 as u8),
@@ -268,6 +286,7 @@ impl Key {
                 };
             }
             KeyType::Modifier => {
+                self.key_info[layer].tap_type = TapType::Normal;
                 self.key_info[layer].tap_code = ScanCode {
                     key_type: KeyType::Modifier,
                     pos: (code as u8 - KeyboardCodes::KeyboardLeftControl as u8),
@@ -275,6 +294,7 @@ impl Key {
                 };
             }
             KeyType::Letter => {
+                self.key_info[layer].tap_type = TapType::Normal;
                 self.key_info[layer].tap_code = ScanCode {
                     key_type: KeyType::Letter,
                     pos: code as u8,
@@ -284,34 +304,34 @@ impl Key {
         };
     }
 
-    pub fn set_normal_all(&mut self, code: [KeyboardCodes; NUM_LAYERS], toggle: bool) {
-        for i in 0..NUM_LAYERS {
-            self.key_info[i].tap_type = TapType::Normal;
-            match code[i].get_code_type() {
-                KeyType::Layer => {
-                    self.key_info[i].tap_code = ScanCode {
-                        key_type: KeyType::Layer,
-                        pos: (code[i] as u8 - KeyboardCodes::Layer0 as u8),
-                        toggle,
-                    };
-                }
-                KeyType::Modifier => {
-                    self.key_info[i].tap_code = ScanCode {
-                        key_type: KeyType::Modifier,
-                        pos: (code[i] as u8 - KeyboardCodes::KeyboardLeftControl as u8),
-                        toggle,
-                    };
-                }
-                KeyType::Letter => {
-                    self.key_info[i].tap_code = ScanCode {
-                        key_type: KeyType::Letter,
-                        pos: code[i] as u8,
-                        toggle,
-                    };
-                }
-            };
-        }
-    }
+    // pub fn set_normal_all(&mut self, code: [KeyboardCodes; NUM_LAYERS], toggle: bool) {
+    //     for i in 0..NUM_LAYERS {
+    //         self.key_info[i].tap_type = TapType::Normal;
+    //         match code[i].get_code_type() {
+    //             KeyType::Layer => {
+    //                 self.key_info[i].tap_code = ScanCode {
+    //                     key_type: KeyType::Layer,
+    //                     pos: (code[i] as u8 - KeyboardCodes::Layer0 as u8),
+    //                     toggle,
+    //                 };
+    //             }
+    //             KeyType::Modifier => {
+    //                 self.key_info[i].tap_code = ScanCode {
+    //                     key_type: KeyType::Modifier,
+    //                     pos: (code[i] as u8 - KeyboardCodes::KeyboardLeftControl as u8),
+    //                     toggle,
+    //                 };
+    //             }
+    //             KeyType::Letter => {
+    //                 self.key_info[i].tap_code = ScanCode {
+    //                     key_type: KeyType::Letter,
+    //                     pos: code[i] as u8,
+    //                     toggle,
+    //                 };
+    //             }
+    //         };
+    //     }
+    // }
 
     pub fn set_hold(
         &mut self,
@@ -386,6 +406,14 @@ impl Key {
         self.pos.update_buf(buf);
     }
 
+    // pub fn is_pressed(&self, layer: usize) -> ScanResult {
+    //     if self.pos.is_pressed() {
+    //         ScanResult::Pressed(self.scan_codes[layer])
+    //     } else {
+    //         ScanResult::Released(self.scan_codes[layer])
+    //     }
+    // }
+
     pub fn is_pressed(&mut self, layer: usize) -> ScanResult {
         match self.key_info[layer].tap_type {
             TapType::Normal => {
@@ -395,30 +423,62 @@ impl Key {
                     ScanResult::Released(self.key_info[layer].tap_code)
                 }
             }
-            TapType::Hold => {
+            TapType::Hold => unsafe {
                 if self.pos.is_pressed() {
-                    if self.key_info[layer].time > HOLD_TIME {
-                        self.was_held = true;
+                    if self.key_info[layer].time == 0 {
+                        self.key_info[layer].time = TIMER.unwrap().get_counter().ticks();
+                        self.key_info[layer].release = TapType::Normal;
+                        self.start = true;
+                        ScanResult::Holding
+                    } else if self.key_info[layer].was_held {
+                        ScanResult::Pressed(self.key_info[layer].hold_code)
+                    } else if TIMER.unwrap().get_counter().ticks() - self.key_info[layer].time
+                        > self.key_info[layer].min_hold_time
+                        || self.other_side
+                    {
+                        self.key_info[layer].was_held = true;
+                        self.key_info[layer].release = TapType::Hold;
                         ScanResult::Pressed(self.key_info[layer].hold_code)
                     } else {
-                        self.key_info[layer].time += 1;
                         ScanResult::Holding
                     }
                 } else {
-                    if self.key_info[layer].time != 0 && self.key_info[layer].time <= HOLD_TIME {
-                        self.was_held = false;
-                        self.key_info[layer].time -= 1;
-                        ScanResult::Pressed(self.key_info[layer].tap_code)
-                    } else if self.was_held {
-                        self.key_info[layer].time = 0;
-                        ScanResult::Released(self.key_info[layer].hold_code)
-                    } else {
-                        self.key_info[layer].time = 0;
-                        ScanResult::Released(self.key_info[layer].tap_code)
+                    match self.key_info[layer].release {
+                        TapType::Hold => {
+                            self.key_info[layer].time = 0;
+                            self.key_info[layer].tap_time = 0;
+                            self.key_info[layer].was_held = false;
+                            ScanResult::Released(self.key_info[layer].hold_code)
+                        }
+                        TapType::Normal => {
+                            if self.start {
+                                self.start = false;
+                                self.key_info[layer].was_held = false;
+                                self.key_info[layer].time = 0;
+                                self.key_info[layer].tap_time =
+                                    TIMER.unwrap().get_counter().ticks();
+                                ScanResult::Pressed(self.key_info[layer].tap_code)
+                            } else if self.key_info[layer].tap_time != 0
+                                && TIMER.unwrap().get_counter().ticks()
+                                    - self.key_info[layer].tap_time
+                                    < PRESS_TIME
+                            {
+                                ScanResult::Pressed(self.key_info[layer].tap_code)
+                            } else {
+                                ScanResult::Released(self.key_info[layer].tap_code)
+                            }
+                        }
                     }
                 }
-            }
+            },
         }
+    }
+
+    pub fn set_other(&mut self, state: bool) {
+        self.other_side = state;
+    }
+    pub fn set_tapping_term(&mut self, term: u64, layer: usize) {
+        self.key_info[layer].min_hold_time = term * 1000;
     }
 
     pub fn get_buf(&self) -> u16 {
