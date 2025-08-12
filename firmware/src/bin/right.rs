@@ -24,6 +24,7 @@ use embassy_usb::class::hid::{HidReaderWriter, HidWriter, State};
 use embassy_usb::{Builder, Config, Handler};
 use gpio::{Level, Output};
 use keyboard::report::Report;
+use tybeast_ones_he::descriptor::{BufferReport, SlaveKeyReport};
 use usbd_hid::descriptor::SerializedDescriptor;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -122,10 +123,6 @@ async fn main(_spawner: Spawner) {
     find_order(&mut order);
 
     let mut keys = Keys::<NUM_KEYS>::default();
-
-    keys.set_reverse(false, 5);
-    keys.set_reverse(false, 11);
-    keys.set_reverse(false, 17);
 
     let mut setup = false;
     while !setup {
@@ -239,12 +236,7 @@ fn find_order(ary: &mut [usize]) {
     ary.copy_from_slice(&new_ary);
 }
 
-fn change_sel<P0: Pin, P1: Pin, P2: Pin>(
-    sel0: &mut Output<P0>,
-    sel1: &mut Output<P1>,
-    sel2: &mut Output<P2>,
-    num: u8,
-) {
+fn change_sel(sel0: &mut Output, sel1: &mut Output, sel2: &mut Output, num: u8) {
     match num {
         0 => {
             sel0.set_low();

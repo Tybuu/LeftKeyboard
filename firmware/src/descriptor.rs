@@ -7,8 +7,6 @@ use usbd_hid::descriptor::{
     AsInputReport,
 };
 
-use crate::keys::Keys;
-
 #[gen_hid_descriptor(
     (collection = APPLICATION, usage_page = GENERIC_DESKTOP, usage = KEYBOARD) = {
         (usage_page = KEYBOARD, usage_min = 0xE0, usage_max = 0xE7) = {
@@ -99,39 +97,53 @@ pub struct BufferReport {
 }
 
 #[gen_hid_descriptor(
-    (collection = APPLICATION, usage_page = VENDOR_DEFINED_START, usage = 0x01) = {
-        key_states=input;
+    (collection = APPLICATION, usage_page = 0xFF68, usage = 0x01) = {
+        input=input;
+        output=output;
     }
 )]
-#[derive(PartialEq, Eq)]
-pub struct SlaveKeyReport {
-    pub key_states: [u8; 3],
+// The max for a single array is 32 elements
+#[allow(dead_code)]
+#[derive(Default)]
+pub struct SlaveReport {
+    pub input: [u8; 32],
+    pub output: [u8; 32],
 }
 
-impl SlaveKeyReport {
-    pub const fn default() -> Self {
-        Self {
-            key_states: [0u8; 3],
-        }
-    }
-
-    pub fn generate_report<const S: usize>(
-        &mut self,
-        keys: &mut Keys<S>,
-    ) -> Option<SlaveKeyReport> {
-        let mut pressed = Vec::<_, S>::new();
-        keys.is_pressed(&mut pressed);
-        let mut new_report = SlaveKeyReport::default();
-        for i in pressed {
-            let a_idx = (i / 8) as usize;
-            let b_idx = i % 8;
-            new_report.key_states[a_idx] |= 1 << b_idx;
-        }
-        if new_report != *self {
-            *self = new_report;
-            Some(*self)
-        } else {
-            None
-        }
-    }
-}
+// #[gen_hid_descriptor(
+//     (collection = APPLICATION, usage_page = 0xFF68, usage = 0x01) = {
+//         key_states=input;
+//     }
+// )]
+// #[derive(PartialEq, Eq)]
+// pub struct SlaveKeyReport {
+//     pub key_states: [u8; 3],
+// }
+//
+// impl SlaveKeyReport {
+//     pub const fn default() -> Self {
+//         Self {
+//             key_states: [0u8; 3],
+//         }
+//     }
+//
+//     pub fn generate_report<const S: usize>(
+//         &mut self,
+//         keys: &mut Keys<S>,
+//     ) -> Option<SlaveKeyReport> {
+//         let mut pressed = Vec::<_, S>::new();
+//         keys.is_pressed(&mut pressed);
+//         let mut new_report = SlaveKeyReport::default();
+//         for i in pressed {
+//             let a_idx = (i / 8) as usize;
+//             let b_idx = i % 8;
+//             new_report.key_states[a_idx] |= 1 << b_idx;
+//         }
+//         if new_report != *self {
+//             *self = new_report;
+//             Some(*self)
+//         } else {
+//             None
+//         }
+//     }
+// }

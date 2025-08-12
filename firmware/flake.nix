@@ -28,6 +28,7 @@
         pkgs.probe-rs
         self.packages.x86_64-linux.elf2uf2-rs
         pkgs.rustfmt
+        pkgs.gcc-arm-embedded
       ];
     };
   };

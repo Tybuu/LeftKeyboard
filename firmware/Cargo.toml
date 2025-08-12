@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "keyboard"
+name = "tybeast_ones_he"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 
@@ -34,15 +34,10 @@ fixed = "1.23.1"
 fixed-macro = "1.2"
 
 
-# for assign resources example
-assign-resources = { git = "https://github.com/adamgreig/assign-resources", rev = "94ad10e2729afdf0fd5a77cd12e68409a982f58a" }
-
-#cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 cortex-m = { version = "0.7.6", features = ["inline-asm"] }
 cortex-m-rt = "0.7.0"
 critical-section = "1.1"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
-st7789 = "0.6.1"
 byte-slice-cast = { version = "1.2.0", default-features = false }
 heapless = "0.8"
 usbd-hid = "0.7.0"
@@ -55,11 +50,11 @@ embedded-storage = { version = "0.3" }
 static_cell = "2"
 portable-atomic = { version = "1.5", features = ["critical-section"] }
 log = "0.4"
-pio-proc = "0.2"
-pio = "0.2.1"
-rand = { version = "0.8.5", default-features = false }
 embedded-sdmmc = "0.7.0"
-micromath = "2.1.0"
+num_enum = {version = "*", default-features = false}
+
+sequential-storage = "*"
+embedded-storage-async = "*"
 
 [profile.release]
 debug = 2
